@@ -147,6 +147,68 @@ def test_claim_complete_unlink_call_cli(monkeypatch, tmp_path) -> None:
     assert f"--dir {tmp_path} unlink {parent_id} {child_id} --actor {actor}" in recorded
 
 
+def test_poll_reloads_upsert_without_pressing_r(tmp_path) -> None:
+    def write_nodes(nodes: list[dict]) -> None:
+        (tmp_path / "work.json").write_text(
+            json.dumps(
+                {
+                    "format": "claimdag/v1",
+                    "next_seq": len(nodes),
+                    "mint_seq": len(nodes),
+                    "nodes": nodes,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    live = {
+        "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "kind": "task",
+        "status": "ready",
+        "role": "general",
+        "assignee": "00000000000000000000000000000000",
+        "parent": "00000000000000000000000000000000",
+        "deps": [],
+        "cas_gen": 1,
+        "created_unix": 1,
+        "updated_unix": 1,
+        "finished_unix": 0,
+        "summary": "first-live-node",
+    }
+    extra = {
+        **live,
+        "id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "summary": "second-live-node",
+        "created_unix": 2,
+        "updated_unix": 2,
+    }
+    done = {**live, "status": "done", "finished_unix": 3, "updated_unix": 3}
+    write_nodes([live])
+    app = WorkGraphApp(directory=tmp_path)
+
+    async def run() -> tuple[list[str], list[str], list[str]]:
+        async with app.run_test() as _pilot:
+            tree = app.query_one(Tree)
+
+            def labels() -> list[str]:
+                return [str(child.label) for child in tree.root.children]
+
+            before = labels()
+            write_nodes([live, extra])
+            await asyncio.sleep(1.2)
+            after_upsert = labels()
+            write_nodes([done, extra])
+            await asyncio.sleep(1.2)
+            after_done = labels()
+            return before, after_upsert, after_done
+
+    before, after_upsert, after_done = asyncio.run(run())
+    assert any("first-live-node" in lab for lab in before)
+    assert any("second-live-node" in lab for lab in after_upsert)
+    assert not any("first-live-node" in lab for lab in after_done)
+    assert any("second-live-node" in lab for lab in after_done)
+
+
 def test_visible_nodes_hides_terminal_and_archived() -> None:
     live = {"id": "aa", "status": "todo", "summary": "live"}
     done = {"id": "bb", "status": "done", "summary": "done"}
