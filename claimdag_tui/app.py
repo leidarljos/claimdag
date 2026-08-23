@@ -30,8 +30,14 @@ def default_dir() -> Path:
     raw = os.environ.get("CLAIMDAG_DIR")
     if raw:
         return Path(raw)
-    xdg = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
-    return Path(xdg) / "claimdag"
+    state = (os.environ.get("HOSTTREE_STATE_DIR") or "").strip()
+    if state:
+        return Path(state)
+    xdg = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp"))
+    hosttree = xdg / "hosttree"
+    if (hosttree / "work.bin").is_file() or (hosttree / "work.json").is_file():
+        return hosttree
+    return xdg / "claimdag"
 
 
 def default_actor() -> str:
@@ -42,7 +48,7 @@ def default_actor() -> str:
     return hashlib.sha256(ident.encode()).hexdigest()[:32]
 
 
-def load_nodes(directory: Path) -> list[dict[str, Any]]:
+def _nodes_from_cli(directory: Path) -> list[dict[str, Any]]:
     bin_name = os.environ.get("CLAIMDAG_BIN", "claimdag")
     exe = shutil.which(bin_name)
     if not exe:
@@ -65,6 +71,28 @@ def load_nodes(directory: Path) -> list[dict[str, Any]]:
     if not isinstance(data, list):
         return []
     return [n for n in data if isinstance(n, dict) and n.get("id")]
+
+
+def _nodes_from_json(directory: Path) -> list[dict[str, Any]]:
+    path = directory / "work.json"
+    if not path.is_file():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    if not isinstance(data, dict):
+        return []
+    nodes = data.get("nodes") or []
+    if not isinstance(nodes, list):
+        return []
+    return [n for n in nodes if isinstance(n, dict) and n.get("id")]
+
+
+def load_nodes(directory: Path) -> list[dict[str, Any]]:
+    if (directory / "work.bin").is_file():
+        return _nodes_from_cli(directory)
+    return _nodes_from_json(directory)
 
 
 def node_id(node: dict[str, Any]) -> str:
@@ -163,6 +191,7 @@ class WorkGraphApp(App[None]):
         self.actor = default_actor()
         self.show_terminal = False
         self.show_archived = False
+        self._stamp = 0
 
     def compose(self) -> ComposeResult:
         self.sub_title = str(self.directory)
@@ -170,8 +199,25 @@ class WorkGraphApp(App[None]):
         yield Tree("work")
         yield Footer()
 
+    def _snap_stamp(self) -> int:
+        best = 0
+        for name in ("work.bin", "work.json"):
+            try:
+                best = max(best, (self.directory / name).stat().st_mtime_ns)
+            except OSError:
+                continue
+        return best
+
     def on_mount(self) -> None:
+        self._stamp = self._snap_stamp()
         self.refresh_tree()
+        self.set_interval(1.0, self._poll)
+
+    def _poll(self) -> None:
+        stamp = self._snap_stamp()
+        if stamp != self._stamp:
+            self._stamp = stamp
+            self.refresh_tree()
 
     def refresh_tree(self) -> None:
         tree = self.query_one(Tree)

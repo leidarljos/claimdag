@@ -73,6 +73,18 @@ def test_default_dir_claimdag_then_xdg(monkeypatch, tmp_path) -> None:
     assert default_dir() == tmp_path / "claimdag"
 
 
+def test_default_dir_uses_hosttree_state_when_snap_present(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("CLAIMDAG_DIR", raising=False)
+    monkeypatch.delenv("HOSTTREE_STATE_DIR", raising=False)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    hosttree = tmp_path / "hosttree"
+    hosttree.mkdir()
+    (hosttree / "work.json").write_text("{}", encoding="utf-8")
+    assert default_dir() == hosttree
+    monkeypatch.setenv("HOSTTREE_STATE_DIR", str(tmp_path / "seat"))
+    assert default_dir() == tmp_path / "seat"
+
+
 def test_storm_tokens() -> None:
     shared = CSS_FILES[0].read_text(encoding="utf-8")
     widgets = CSS_FILES[1].read_text(encoding="utf-8")
@@ -119,6 +131,10 @@ def test_claim_complete_unlink_call_cli(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("CLAIMDAG_BIN", "claimdag")
     monkeypatch.setenv("CLAIMDAG_ACTOR", "11111111111111111111111111111111")
 
+    (tmp_path / "work.json").write_text(
+        (FIXTURE_DIR / "work.json").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
     app = WorkGraphApp(directory=tmp_path)
 
     async def run() -> None:
