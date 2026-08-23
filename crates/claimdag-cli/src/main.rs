@@ -132,11 +132,23 @@ fn print_list_json(nodes: &[&WorkNode]) -> Result<(), String> {
 
 fn print_list_line(n: &WorkNode) {
     let flag = if n.archived { "  archived" } else { "" };
+    let who = if n.assignee.is_zero() {
+        String::new()
+    } else {
+        format!("  {}", &n.assignee.to_hex()[..8])
+    };
+    let role = if n.role.as_str() == "unset" {
+        String::new()
+    } else {
+        format!("  {}", n.role.as_str())
+    };
     println!(
-        "{}  {}  {}  gen={}{}  {}",
+        "{}  {}  {}{}{}  gen={}{}  {}",
         n.id.to_hex(),
         n.status.as_str(),
         n.kind.as_str(),
+        who,
+        role,
         n.cas_gen,
         flag,
         n.summary

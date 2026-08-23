@@ -50,9 +50,26 @@ def test_parent_tree_of_fixture() -> None:
 def test_dump_forest_fixture() -> None:
     text = dump_forest(load_nodes(FIXTURE_DIR))
     assert text == (
-        "ready  land the adapter\n"
-        "  todo  write the tree  deps=1\n"
-        "  todo  verify the tree  deps=1\n"
+        "ready  orchestrator  land the adapter\n"
+        "  todo  implementor  write the tree  deps=1\n"
+        "  todo  verifier  verify the tree  deps=1\n"
+    )
+
+
+def test_node_label_shows_assignee_and_handle() -> None:
+    from claimdag_tui.app import node_label
+
+    node = {
+        "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "status": "claimed",
+        "role": "orchestrator",
+        "assignee": "cfacf7183b6cfb113ca36acc38ab1f98",
+        "summary": "keep the seat",
+    }
+    assert node_label(node) == "claimed  cfacf718  orchestrator  keep the seat"
+    assert (
+        node_label(node, {"cfacf7183b6cfb113ca36acc38ab1f98": "product"})
+        == "claimed  product  orchestrator  keep the seat"
     )
 
 

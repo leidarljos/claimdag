@@ -114,14 +114,56 @@ def visible_nodes(
     return out
 
 
-def node_label(node: dict[str, Any]) -> str:
+def _assignee_hex(node: dict[str, Any]) -> str:
+    raw = str(node.get("assignee") or "").strip().lower()
+    if len(raw) != 32 or raw == ZERO:
+        return ""
+    return raw
+
+
+def handle_map(directory: Path | None = None) -> dict[str, str]:
+    """Optional hex -> short name. File is CLAIMDAG_HANDLES or <dir>/handles.json."""
+    paths: list[Path] = []
+    raw = (os.environ.get("CLAIMDAG_HANDLES") or "").strip()
+    if raw:
+        paths.append(Path(raw))
+    if directory is not None:
+        paths.append(directory / "handles.json")
+    out: dict[str, str] = {}
+    for path in paths:
+        if not path.is_file():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        for key, val in data.items():
+            hex_id = str(key).strip().lower()
+            name = str(val).strip()
+            if len(hex_id) == 32 and name:
+                out[hex_id] = name
+    return out
+
+
+def node_label(node: dict[str, Any], handles: dict[str, str] | None = None) -> str:
     nid = node_id(node)
     status = str(node.get("status") or "?")
     summary = str(node.get("summary") or "").strip() or nid[:8]
+    parts = [status]
+    who = _assignee_hex(node)
+    if who:
+        label = (handles or {}).get(who) or who[:8]
+        parts.append(label)
+    role = str(node.get("role") or "").strip()
+    if role and role not in {"", "unset"}:
+        parts.append(role)
+    parts.append(summary)
     deps = node.get("deps") or []
     extra = f"  deps={len(deps)}" if isinstance(deps, list) and deps else ""
     flag = "  archived" if node.get("archived") else ""
-    return f"{status}  {summary}{extra}{flag}"
+    return "  ".join(parts) + extra + flag
 
 
 def parent_tree(
@@ -142,7 +184,9 @@ def parent_tree(
     return by_id, children, roots
 
 
-def dump_forest(nodes: list[dict[str, Any]]) -> str:
+def dump_forest(
+    nodes: list[dict[str, Any]], handles: dict[str, str] | None = None
+) -> str:
     by_id, children, roots = parent_tree(nodes)
     if not roots:
         return "(empty)\n"
@@ -153,7 +197,7 @@ def dump_forest(nodes: list[dict[str, Any]]) -> str:
             lines.append(f"{prefix}{nid[:8]}  (cycle)")
             return
         node = by_id[nid]
-        lines.append(f"{prefix}{node_label(node)}")
+        lines.append(f"{prefix}{node_label(node, handles)}")
         nxt = seen | {nid}
         for kid in children.get(nid, []):
             walk(kid, prefix + "  ", nxt)
@@ -183,6 +227,7 @@ class WorkGraphApp(App[None]):
         super().__init__()
         self.directory = directory or default_dir()
         self.actor = default_actor()
+        self.handles = handle_map(self.directory)
         self.show_terminal = False
         self.show_archived = False
         self._stamp = 0
@@ -195,7 +240,7 @@ class WorkGraphApp(App[None]):
 
     def _snap_stamp(self) -> int:
         best = 0
-        for name in ("work.bin", "work.json"):
+        for name in ("work.bin", "work.json", "handles.json"):
             try:
                 best = max(best, (self.directory / name).stat().st_mtime_ns)
             except OSError:
@@ -211,9 +256,11 @@ class WorkGraphApp(App[None]):
         stamp = self._snap_stamp()
         if stamp != self._stamp:
             self._stamp = stamp
+            self.handles = handle_map(self.directory)
             self.refresh_tree()
 
     def refresh_tree(self) -> None:
+        self.handles = handle_map(self.directory)
         tree = self.query_one(Tree)
         tree.clear()
         tree.root.expand()
@@ -232,7 +279,7 @@ class WorkGraphApp(App[None]):
             if nid in seen:
                 parent_node.add_leaf(f"{nid[:8]}  (cycle)")
                 return
-            label = node_label(by_id[nid])
+            label = node_label(by_id[nid], self.handles)
             branch = parent_node.add(label, data=nid, expand=True)
             nxt = seen | {nid}
             for kid in children.get(nid, []):
@@ -345,7 +392,7 @@ def main(argv: list[str] | None = None) -> int:
         nodes = load_nodes(directory)
         if not args.all:
             nodes = visible_nodes(nodes, show_terminal=False, show_archived=False)
-        sys.stdout.write(dump_forest(nodes))
+        sys.stdout.write(dump_forest(nodes, handle_map(directory)))
         return 0
     WorkGraphApp(directory=directory).run()
     return 0
