@@ -753,6 +753,17 @@ mod tests {
         assert!(g.verify().is_ok());
     }
 
+    #[test]
+    fn complete_preserves_summary_cite_when_empty() {
+        let mut g = WorkGraph::default();
+        let a = id(1);
+        upsert_ready(&mut g, a, "cite:TICKET-compwrite do the work");
+        g.complete(a, WorkStatus::Done, "", id(9)).unwrap();
+        let n = g.get(a).unwrap();
+        assert_eq!(n.status, WorkStatus::Done);
+        assert_eq!(n.summary, "cite:TICKET-compwrite do the work");
+    }
+
     fn upsert_ready(g: &mut WorkGraph, node: WorkId, summary: &str) {
         g.upsert(
             node,
