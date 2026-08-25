@@ -21,7 +21,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.widgets import Footer, Header, Tree
 
-from claimdag_tui.theme import CSS_FILES
+from claimdag_tui.theme import CSS_FILES, apply_seat_theme
 
 ZERO = "0" * 32
 
@@ -225,6 +225,7 @@ class WorkGraphApp(App[None]):
 
     def __init__(self, directory: Path | None = None) -> None:
         super().__init__()
+        apply_seat_theme(self)
         self.directory = directory or default_dir()
         self.actor = default_actor()
         self.handles = handle_map(self.directory)
@@ -248,6 +249,7 @@ class WorkGraphApp(App[None]):
         return best
 
     def on_mount(self) -> None:
+        apply_seat_theme(self)
         self._stamp = self._snap_stamp()
         self.refresh_tree()
         self.set_interval(1.0, self._poll)
