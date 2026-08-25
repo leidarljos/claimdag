@@ -10,7 +10,7 @@ from pathlib import Path
 import textual
 from textual.widgets import Tree
 
-from claimdag_tui.theme import CSS_FILES
+from claimdag_tui.theme import css_files, seat_prefers_light
 from claimdag_tui.app import (
     WorkGraphApp,
     default_dir,
@@ -90,16 +90,30 @@ def test_default_dir_claimdag_then_xdg(monkeypatch, tmp_path) -> None:
     assert default_dir() == tmp_path / "claimdag"
 
 
-def test_storm_tokens() -> None:
-    shared = CSS_FILES[0].read_text(encoding="utf-8")
-    widgets = CSS_FILES[1].read_text(encoding="utf-8")
-    assert CSS_FILES[0].name == "tokyo_night_storm.tcss"
+def test_storm_tokens(monkeypatch) -> None:
+    monkeypatch.setenv("THEME", "tokyonight")
+    files = css_files()
+    shared = files[0].read_text(encoding="utf-8")
+    widgets = files[1].read_text(encoding="utf-8")
+    assert files[0].name == "tokyo_night_storm.tcss"
     assert "#24283b" in shared
     assert "(36, 40, 59)" in shared
     assert "#c0caf5" in shared
     assert "#7aa2f7" in shared
     assert "$panel:" not in shared
     assert "height: 1fr" in widgets
+
+
+def test_day_tokens(monkeypatch) -> None:
+    monkeypatch.setenv("THEME", "auto")
+    monkeypatch.setenv("HOSTTREE_COLOR_SCHEME", "prefer-light")
+    assert seat_prefers_light() is True
+    files = css_files()
+    assert files[0].name == "day.tcss"
+    shared = files[0].read_text(encoding="utf-8")
+    assert "#eeeeee" in shared
+    assert "#262626" in shared
+    assert "#2F64D2" in shared
 
 
 def test_app_tree_renders_fixture(monkeypatch) -> None:
