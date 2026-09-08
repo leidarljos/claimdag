@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use claimdag::{WorkGraph, WorkId, WorkKind, WorkNode, WorkRole, WorkStatus};
+use claimdag::{WorkFields, WorkGraph, WorkId, WorkKind, WorkNode, WorkRole, WorkStatus};
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
@@ -234,7 +234,17 @@ fn run() -> Result<(), String> {
             let role = WorkRole::parse_str(&role).ok_or_else(|| format!("bad role {role}"))?;
             let parent = parse_id(&parent)?;
             let actor = parse_id(&actor)?;
-            let out = g.upsert(wid, kind, status, role, parent, actor, &summary)?;
+            let out = g.upsert(
+                wid,
+                WorkFields {
+                    kind,
+                    status,
+                    role,
+                    parent,
+                    actor,
+                    summary: &summary,
+                },
+            )?;
             g.save_dir(&cli.dir)?;
             println!("{}", out.to_hex());
         }

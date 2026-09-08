@@ -8,6 +8,8 @@ mod graph;
 mod id;
 mod snap;
 
-pub use graph::{WorkGraph, WorkKind, WorkLedgerEntry, WorkNode, WorkRole, WorkStatus, SNAP_FILE};
+pub use graph::{
+    WorkFields, WorkGraph, WorkKind, WorkLedgerEntry, WorkNode, WorkRole, WorkStatus, SNAP_FILE,
+};
 pub use id::{mint_work_id, WorkId};
 pub use snap::SNAP_BIN;

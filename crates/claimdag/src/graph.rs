@@ -163,23 +163,29 @@ pub struct WorkLedgerEntry {
     pub op: &'static str,
 }
 
-#[derive(Debug)]
+/// The fields an upsert sets on a node.
+#[derive(Debug, Clone, Copy)]
+pub struct WorkFields<'a> {
+    /// What sort of work it is.
+    pub kind: WorkKind,
+    /// The status asked for. Readiness is still derived from the dependencies.
+    pub status: WorkStatus,
+    /// Who the work is for.
+    pub role: WorkRole,
+    /// The node this one hangs under, or zero.
+    pub parent: WorkId,
+    /// Who is asking, for the ledger.
+    pub actor: WorkId,
+    /// The one open text field.
+    pub summary: &'a str,
+}
+
+#[derive(Debug, Default)]
 pub struct WorkGraph {
     nodes: HashMap<WorkId, WorkNode>,
     ledger: VecDeque<WorkLedgerEntry>,
     next_seq: u64,
     mint_seq: u64,
-}
-
-impl Default for WorkGraph {
-    fn default() -> Self {
-        Self {
-            nodes: HashMap::new(),
-            ledger: VecDeque::new(),
-            next_seq: 0,
-            mint_seq: 0,
-        }
-    }
 }
 
 impl WorkGraph {
@@ -269,16 +275,20 @@ impl WorkGraph {
         }
     }
 
-    pub fn upsert(
-        &mut self,
-        mut id: WorkId,
-        kind: WorkKind,
-        status: WorkStatus,
-        role: WorkRole,
-        parent: WorkId,
-        actor: WorkId,
-        summary: &str,
-    ) -> Result<WorkId, String> {
+    /// What an upsert is asserting about a node.
+    ///
+    /// Eight positional arguments where five of them describe the same node is
+    /// a call nobody can read at the site, and two ids of the same type next to
+    /// each other is a swap waiting to happen.
+    pub fn upsert(&mut self, mut id: WorkId, fields: WorkFields<'_>) -> Result<WorkId, String> {
+        let WorkFields {
+            kind,
+            status,
+            role,
+            parent,
+            actor,
+            summary,
+        } = fields;
         if id.is_zero() {
             id = self.mint_id(kind, parent, summary);
         }
@@ -303,11 +313,20 @@ impl WorkGraph {
             // Sticky terminal: reject reopen/status forge (client sees error).
             return Err("upsert: node is terminal".into());
         }
+        // A live claim is claim's to end, not upsert's. Demoting a Claimed node
+        // to Todo leaves the assignee in place and lets a second agent claim
+        // work the first is holding, with neither claim ever failing.
+        let live = matches!(entry.status, WorkStatus::Claimed | WorkStatus::Running);
+        if live && status != entry.status {
+            return Err("upsert: node is claimed; use completeWork".into());
+        }
         // Lifecycle authority: claim/complete own Claimed/Running/terminal.
         // Upsert only metadata + Todo|Ready|Blocked.
         match status {
             WorkStatus::Todo | WorkStatus::Ready | WorkStatus::Blocked => {
-                entry.status = status;
+                if !live {
+                    entry.status = status;
+                }
             }
             WorkStatus::Claimed
             | WorkStatus::Running
@@ -333,6 +352,11 @@ impl WorkGraph {
         }
         entry.updated_unix = now;
         let wid = entry.id;
+        // Readiness is derived, never asserted: a caller may ask for Ready and
+        // the dependencies decide. Otherwise the status lies to every reader
+        // who uses it to pick up workable work, and the claim being refused
+        // later does not help the one who believed it.
+        self.recompute_ready(wid);
         self.push_ledger(wid, actor, "upsert");
         self.prune();
         Ok(wid)
@@ -355,7 +379,7 @@ impl WorkGraph {
             return Err("link: would create cycle".into());
         }
         let node = self.nodes.get_mut(&child).expect("child present");
-        if !node.deps.iter().any(|d| *d == parent) {
+        if !node.deps.contains(&parent) {
             node.deps.push(parent);
             node.updated_unix = Self::now();
         }
@@ -439,7 +463,7 @@ impl WorkGraph {
         let children: Vec<WorkId> = self
             .nodes
             .values()
-            .filter(|n| n.deps.iter().any(|d| *d == done_id))
+            .filter(|n| n.deps.contains(&done_id))
             .map(|n| n.id)
             .collect();
         for c in children {
@@ -523,6 +547,12 @@ impl WorkGraph {
         if !matches!(node.status, WorkStatus::Claimed | WorkStatus::Running) {
             return Err(format!("running: status {}", node.status.as_str()));
         }
+        // The same question complete asks, and it has to answer the same way,
+        // or the ledger records a stranger as having started somebody's work.
+        // A zero actor is the command line's escape, as it is there.
+        if !node.assignee.is_zero() && !actor.is_zero() && node.assignee != actor {
+            return Err("running: not assignee".into());
+        }
         node.status = WorkStatus::Running;
         node.updated_unix = Self::now();
         self.push_ledger(id, actor, "running");
@@ -547,19 +577,18 @@ impl WorkGraph {
             .nodes
             .get_mut(&id)
             .ok_or_else(|| "complete: not found".to_string())?;
+        // Whoever held it is who may still speak for it. The guard runs before
+        // the terminal case, not after: a finished node is exactly the one a
+        // stranger would otherwise be able to rewrite, since the early return
+        // used to be reached first.
+        if !node.assignee.is_zero() && !actor.is_zero() && node.assignee != actor {
+            return Err("complete: not assignee".into());
+        }
         if node.status.is_terminal() {
             if !summary.is_empty() {
                 node.summary = summary.to_string();
             }
             return Ok(());
-        }
-        // If claimed/running, only the assignee (or zero actor = CLI escape) may complete.
-        if matches!(node.status, WorkStatus::Claimed | WorkStatus::Running)
-            && !node.assignee.is_zero()
-            && !actor.is_zero()
-            && node.assignee != actor
-        {
-            return Err("complete: not assignee".into());
         }
         node.status = status;
         if !summary.is_empty() {
@@ -682,22 +711,26 @@ mod tests {
         let b = id(2);
         g.upsert(
             a,
-            WorkKind::Step,
-            WorkStatus::Ready,
-            WorkRole::Explore,
-            WorkId::ZERO,
-            id(9),
-            "A",
+            WorkFields {
+                kind: WorkKind::Step,
+                status: WorkStatus::Ready,
+                role: WorkRole::Explore,
+                parent: WorkId::ZERO,
+                actor: id(9),
+                summary: "A",
+            },
         )
         .unwrap();
         g.upsert(
             b,
-            WorkKind::Step,
-            WorkStatus::Todo,
-            WorkRole::Implementor,
-            WorkId::ZERO,
-            id(9),
-            "B",
+            WorkFields {
+                kind: WorkKind::Step,
+                status: WorkStatus::Todo,
+                role: WorkRole::Implementor,
+                parent: WorkId::ZERO,
+                actor: id(9),
+                summary: "B",
+            },
         )
         .unwrap();
         g.link_dep(a, b, id(9)).unwrap();
@@ -723,12 +756,14 @@ mod tests {
     fn upsert_ready(g: &mut WorkGraph, node: WorkId, summary: &str) {
         g.upsert(
             node,
-            WorkKind::Task,
-            WorkStatus::Ready,
-            WorkRole::Unset,
-            WorkId::ZERO,
-            id(9),
-            summary,
+            WorkFields {
+                kind: WorkKind::Task,
+                status: WorkStatus::Ready,
+                role: WorkRole::Unset,
+                parent: WorkId::ZERO,
+                actor: id(9),
+                summary,
+            },
         )
         .unwrap();
     }
@@ -799,10 +834,9 @@ mod tests {
             1,
             "exactly one of X-on-A / X-on-B succeeds; A={r_a:?} B={r_b:?}"
         );
-        let busy = if r_a.is_err() {
-            r_a.unwrap_err()
-        } else {
-            r_b.unwrap_err()
+        let busy = match (r_a, r_b) {
+            (Err(losing), _) | (_, Err(losing)) => losing,
+            (Ok(_), Ok(_)) => unreachable!("the assertion above ruled this out"),
         };
         assert!(
             busy.starts_with("claim: assignee busy"),
@@ -826,22 +860,26 @@ mod tests {
         let b = id(2);
         g.upsert(
             a,
-            WorkKind::Task,
-            WorkStatus::Todo,
-            WorkRole::Unset,
-            WorkId::ZERO,
-            id(9),
-            "",
+            WorkFields {
+                kind: WorkKind::Task,
+                status: WorkStatus::Todo,
+                role: WorkRole::Unset,
+                parent: WorkId::ZERO,
+                actor: id(9),
+                summary: "",
+            },
         )
         .unwrap();
         g.upsert(
             b,
-            WorkKind::Task,
-            WorkStatus::Todo,
-            WorkRole::Unset,
-            WorkId::ZERO,
-            id(9),
-            "",
+            WorkFields {
+                kind: WorkKind::Task,
+                status: WorkStatus::Todo,
+                role: WorkRole::Unset,
+                parent: WorkId::ZERO,
+                actor: id(9),
+                summary: "",
+            },
         )
         .unwrap();
         g.link_dep(a, b, id(9)).unwrap();
@@ -854,12 +892,14 @@ mod tests {
         let id = g
             .upsert(
                 WorkId::ZERO,
-                WorkKind::Goal,
-                WorkStatus::Ready,
-                WorkRole::Orchestrator,
-                WorkId::ZERO,
-                WorkId::ZERO,
-                "mint me",
+                WorkFields {
+                    kind: WorkKind::Goal,
+                    status: WorkStatus::Ready,
+                    role: WorkRole::Orchestrator,
+                    parent: WorkId::ZERO,
+                    actor: WorkId::ZERO,
+                    summary: "mint me",
+                },
             )
             .unwrap();
         assert!(!id.is_zero());
@@ -871,23 +911,27 @@ mod tests {
         let a = id(7);
         g.upsert(
             a,
-            WorkKind::Task,
-            WorkStatus::Ready,
-            WorkRole::Unset,
-            WorkId::ZERO,
-            id(9),
-            "x",
+            WorkFields {
+                kind: WorkKind::Task,
+                status: WorkStatus::Ready,
+                role: WorkRole::Unset,
+                parent: WorkId::ZERO,
+                actor: id(9),
+                summary: "x",
+            },
         )
         .unwrap();
         assert!(g
             .upsert(
                 a,
-                WorkKind::Task,
-                WorkStatus::Claimed,
-                WorkRole::Unset,
-                WorkId::ZERO,
-                id(9),
-                "",
+                WorkFields {
+                    kind: WorkKind::Task,
+                    status: WorkStatus::Claimed,
+                    role: WorkRole::Unset,
+                    parent: WorkId::ZERO,
+                    actor: id(9),
+                    summary: "",
+                },
             )
             .is_err());
         // Initial cas_gen is 1 (wire 0 = ignore).
@@ -903,12 +947,14 @@ mod tests {
         let a = id(42);
         g.upsert(
             a,
-            WorkKind::Task,
-            WorkStatus::Ready,
-            WorkRole::Implementor,
-            WorkId::ZERO,
-            id(9),
-            "persist me",
+            WorkFields {
+                kind: WorkKind::Task,
+                status: WorkStatus::Ready,
+                role: WorkRole::Implementor,
+                parent: WorkId::ZERO,
+                actor: id(9),
+                summary: "persist me",
+            },
         )
         .unwrap();
         g.complete(a, WorkStatus::Done, "done on disk", id(9))
@@ -929,12 +975,14 @@ mod tests {
         let a = id(7);
         g.upsert(
             a,
-            WorkKind::Task,
-            WorkStatus::Ready,
-            WorkRole::Unset,
-            WorkId::ZERO,
-            id(9),
-            "live",
+            WorkFields {
+                kind: WorkKind::Task,
+                status: WorkStatus::Ready,
+                role: WorkRole::Unset,
+                parent: WorkId::ZERO,
+                actor: id(9),
+                summary: "live",
+            },
         )
         .unwrap();
         assert_eq!(g.archive(a, id(9)).unwrap_err(), "archive: not terminal");
@@ -992,12 +1040,14 @@ mod tests {
         upsert_ready(&mut g, a, "A");
         g.upsert(
             b,
-            WorkKind::Task,
-            WorkStatus::Todo,
-            WorkRole::Unset,
-            WorkId::ZERO,
-            id(9),
-            "B",
+            WorkFields {
+                kind: WorkKind::Task,
+                status: WorkStatus::Todo,
+                role: WorkRole::Unset,
+                parent: WorkId::ZERO,
+                actor: id(9),
+                summary: "B",
+            },
         )
         .unwrap();
         g.link_dep(a, b, id(9)).unwrap();
@@ -1019,12 +1069,14 @@ mod tests {
         upsert_ready(&mut g, a, "A");
         g.upsert(
             b,
-            WorkKind::Task,
-            WorkStatus::Todo,
-            WorkRole::Unset,
-            WorkId::ZERO,
-            id(9),
-            "B",
+            WorkFields {
+                kind: WorkKind::Task,
+                status: WorkStatus::Todo,
+                role: WorkRole::Unset,
+                parent: WorkId::ZERO,
+                actor: id(9),
+                summary: "B",
+            },
         )
         .unwrap();
         g.unlink_dep(a, b, id(9)).unwrap();
@@ -1042,12 +1094,14 @@ mod tests {
         let err = g
             .upsert(
                 a,
-                WorkKind::Task,
-                WorkStatus::Ready,
-                WorkRole::Unset,
-                WorkId::ZERO,
-                id(9),
-                "reopen",
+                WorkFields {
+                    kind: WorkKind::Task,
+                    status: WorkStatus::Ready,
+                    role: WorkRole::Unset,
+                    parent: WorkId::ZERO,
+                    actor: id(9),
+                    summary: "reopen",
+                },
             )
             .unwrap_err();
         assert_eq!(err, "upsert: node is terminal");
@@ -1067,12 +1121,14 @@ mod tests {
         assert_eq!(
             g.upsert(
                 b,
-                WorkKind::Task,
-                WorkStatus::Todo,
-                WorkRole::Unset,
-                WorkId::ZERO,
-                id(9),
-                "",
+                WorkFields {
+                    kind: WorkKind::Task,
+                    status: WorkStatus::Todo,
+                    role: WorkRole::Unset,
+                    parent: WorkId::ZERO,
+                    actor: id(9),
+                    summary: "",
+                },
             )
             .unwrap_err(),
             "upsert: node is terminal"
