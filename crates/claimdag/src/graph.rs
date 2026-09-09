@@ -288,6 +288,13 @@ impl WorkGraph {
         if id.is_zero() {
             id = self.mint_id(kind, parent, summary);
         }
+        // The parent chain is a forest and nothing else enforced that. A
+        // dependency edge is checked for a loop and a parent edge was not, so
+        // `upsert --id X --parent X` was accepted and any reader that walks up
+        // from a node, or draws the tree, ran forever on it.
+        if !parent.is_zero() && (parent == id || self.parent_reaches(parent, id)) {
+            return Err("upsert: parent cycle".into());
+        }
         let now = Self::now();
         let entry = self.nodes.entry(id).or_insert_with(|| WorkNode {
             id,
@@ -421,6 +428,28 @@ impl WorkGraph {
             if let Some(n) = self.nodes.get(&id) {
                 stack.extend(n.deps.iter().copied());
             }
+        }
+        false
+    }
+
+    /// Whether walking up from `from` reaches `target`.
+    ///
+    /// Bounded by the visited set rather than by depth, because a chain that
+    /// is already circular is exactly the input this has to survive.
+    fn parent_reaches(&self, from: WorkId, target: WorkId) -> bool {
+        let mut at = from;
+        let mut seen = HashSet::new();
+        while !at.is_zero() {
+            if at == target {
+                return true;
+            }
+            if !seen.insert(at) {
+                return false;
+            }
+            let Some(node) = self.nodes.get(&at) else {
+                return false;
+            };
+            at = node.parent;
         }
         false
     }
@@ -659,6 +688,12 @@ impl WorkGraph {
                 if let Some(nn) = self.nodes.get(&cur) {
                     stack.extend(nn.deps.iter().copied());
                 }
+            }
+            // A parent that is not in the graph is not an error: prune drops
+            // finished work and leaves its children as roots. A parent chain
+            // that comes back to where it started is.
+            if !n.parent.is_zero() && self.parent_reaches(n.parent, *id) {
+                return Err(format!("verify: parent cycle involving {}", id.to_hex()));
             }
         }
         Ok(())

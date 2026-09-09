@@ -184,3 +184,78 @@ fn a_failed_dependency_does_not_ready_what_waited_on_it() {
     );
     assert!(graph.claim(blocked, actor(8), None).is_err());
 }
+
+/// The parent chain is a forest. A dependency edge is refused when it would
+/// close a loop, and the parent edge has to be refused for the same reason:
+/// every reader that draws the tree, or walks up from a node to find its root,
+/// runs forever on a chain that comes back to where it started.
+#[test]
+fn a_node_cannot_become_its_own_ancestor() {
+    let mut graph = WorkGraph::default();
+    let root = ready(&mut graph, "land the adapter");
+    let kid = graph
+        .upsert(
+            WorkId::ZERO,
+            WorkFields {
+                kind: WorkKind::Task,
+                status: WorkStatus::Todo,
+                role: WorkRole::Unset,
+                parent: root,
+                actor: actor(1),
+                summary: "write the tree",
+            },
+        )
+        .expect("child");
+
+    let point_at = |graph: &mut WorkGraph, id: WorkId, parent: WorkId| {
+        graph.upsert(
+            id,
+            WorkFields {
+                kind: WorkKind::Unset,
+                status: WorkStatus::Todo,
+                role: WorkRole::Unset,
+                parent,
+                actor: actor(1),
+                summary: "",
+            },
+        )
+    };
+
+    assert!(point_at(&mut graph, root, root).is_err(), "own parent");
+    assert!(point_at(&mut graph, root, kid).is_err(), "two-node loop");
+    assert_eq!(graph.get(root).expect("root").parent, WorkId::ZERO);
+    assert_eq!(graph.get(kid).expect("kid").parent, root);
+    graph.verify().expect("still a forest");
+}
+
+/// Reparenting sideways is ordinary and must keep working: the check refuses a
+/// loop, not a move.
+#[test]
+fn a_node_can_be_moved_under_a_different_parent() {
+    let mut graph = WorkGraph::default();
+    let first = ready(&mut graph, "land the adapter");
+    let second = ready(&mut graph, "write the tree");
+    let leaf = ready(&mut graph, "verify the tree");
+
+    let reparent = |graph: &mut WorkGraph, id: WorkId, parent: WorkId| {
+        graph
+            .upsert(
+                id,
+                WorkFields {
+                    kind: WorkKind::Unset,
+                    status: WorkStatus::Todo,
+                    role: WorkRole::Unset,
+                    parent,
+                    actor: actor(1),
+                    summary: "",
+                },
+            )
+            .expect("reparent");
+    };
+
+    reparent(&mut graph, leaf, first);
+    assert_eq!(graph.get(leaf).expect("leaf").parent, first);
+    reparent(&mut graph, leaf, second);
+    assert_eq!(graph.get(leaf).expect("leaf").parent, second);
+    graph.verify().expect("still a forest");
+}
