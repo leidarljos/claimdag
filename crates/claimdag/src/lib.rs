@@ -6,10 +6,12 @@
 mod claimdag_capnp;
 mod graph;
 mod id;
+mod seat;
 mod snap;
 
 pub use graph::{
     WorkFields, WorkGraph, WorkKind, WorkLedgerEntry, WorkNode, WorkRole, WorkStatus, SNAP_FILE,
 };
 pub use id::{mint_work_id, WorkId};
+pub use seat::resolve_dir;
 pub use snap::SNAP_BIN;

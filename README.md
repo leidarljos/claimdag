@@ -38,18 +38,22 @@ claimdag = { git = "https://github.com/HaoZeke/claimdag", tag = "v0.1.3" }
 
 ## WorkGraph pane
 
-Textual tree. Mutations call `claimdag`. This process does not reimplement
-claim, complete, unlink, or archive.
+The graph is a DAG over dependencies and a forest over parents. The pane draws
+the forest, and mutates through the same `WorkGraph` calls the command line
+makes, so an action a stranger may not take fails in the pane too.
 
 ```console
-$ pip install -e .
 $ CLAIMDAG_DIR=/var/lib/seat claimdag-tui
 $ claimdag-tui --dir /var/lib/seat --dump
 ```
 
-Bindings: `c` claim, `d` complete, `a` archive, `h` show done, `A` show
-archived, `u` unlink, `r` refresh. Theme is Tokyo Night Storm
-(`#24283b` / `#c0caf5` / `#7aa2f7`).
+Bindings: `c` claim, `d` complete, `a` archive, `u` unlink, `h` show finished,
+`A` show archived, `r` reload, `q` quit. Colours come from the terminal.
+
+`CLAIMDAG_ACTOR` pins who the pane claims as; without it the id is derived
+from user and host, so the same seat is the same actor across restarts.
+`handles.json` in the graph directory, or `CLAIMDAG_HANDLES`, maps actor ids
+to names a person recognises.
 
 Docs: [docs/orgmode/architecture.org](docs/orgmode/architecture.org).
 Schema: [schema/claimdag.capnp](schema/claimdag.capnp).

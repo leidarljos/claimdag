@@ -15,28 +15,6 @@ struct Cli {
     cmd: Cmd,
 }
 
-/// Where the work graph lives when the command line does not say.
-///
-/// `CLAIMDAG_DIR`, then the runtime directory, which is what the pane already
-/// does. The current directory is not a default: one graph per seat is the
-/// point, and `.` puts a work.bin in whichever checkout somebody happened to
-/// be standing in, so the two front ends of one tool would disagree about
-/// which graph they mean.
-fn resolve_dir(explicit: Option<PathBuf>) -> PathBuf {
-    if let Some(dir) = explicit {
-        return dir;
-    }
-    if let Some(raw) = std::env::var_os("CLAIMDAG_DIR") {
-        if !raw.is_empty() {
-            return PathBuf::from(raw);
-        }
-    }
-    let base = std::env::var_os("XDG_RUNTIME_DIR")
-        .filter(|raw| !raw.is_empty())
-        .map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
-    base.join("claimdag")
-}
-
 #[derive(Subcommand)]
 enum Cmd {
     /// List nodes, newest first. Default is live work only.
@@ -210,7 +188,7 @@ fn main() {
 
 fn run() -> Result<(), String> {
     let cli = Cli::parse();
-    let dir = resolve_dir(cli.dir.clone());
+    let dir = claimdag::resolve_dir(cli.dir.clone());
     let mut g = WorkGraph::load_dir(&dir);
     match cli.cmd {
         Cmd::List {
@@ -329,65 +307,4 @@ fn run() -> Result<(), String> {
         }
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod dir_tests {
-    use super::*;
-
-    /// Run a closure with the two variables this resolver reads set.
-    fn with_env<T>(claimdag: Option<&str>, runtime: Option<&str>, f: impl FnOnce() -> T) -> T {
-        let old_c = std::env::var_os("CLAIMDAG_DIR");
-        let old_r = std::env::var_os("XDG_RUNTIME_DIR");
-        match claimdag {
-            Some(v) => std::env::set_var("CLAIMDAG_DIR", v),
-            None => std::env::remove_var("CLAIMDAG_DIR"),
-        }
-        match runtime {
-            Some(v) => std::env::set_var("XDG_RUNTIME_DIR", v),
-            None => std::env::remove_var("XDG_RUNTIME_DIR"),
-        }
-        let out = f();
-        match old_c {
-            Some(v) => std::env::set_var("CLAIMDAG_DIR", v),
-            None => std::env::remove_var("CLAIMDAG_DIR"),
-        }
-        match old_r {
-            Some(v) => std::env::set_var("XDG_RUNTIME_DIR", v),
-            None => std::env::remove_var("XDG_RUNTIME_DIR"),
-        }
-        out
-    }
-
-    #[test]
-    fn the_flag_wins() {
-        with_env(Some("/from/env"), Some("/run"), || {
-            assert_eq!(
-                resolve_dir(Some(PathBuf::from("/from/flag"))),
-                PathBuf::from("/from/flag")
-            );
-        });
-    }
-
-    #[test]
-    fn the_environment_comes_next() {
-        with_env(Some("/from/env"), Some("/run"), || {
-            assert_eq!(resolve_dir(None), PathBuf::from("/from/env"));
-        });
-    }
-
-    #[test]
-    fn the_runtime_directory_is_the_default_and_never_the_working_one() {
-        // A work.bin in whichever checkout somebody was standing in is two
-        // graphs, and the pane would be reading the other one.
-        with_env(None, Some("/run/user/1000"), || {
-            assert_eq!(resolve_dir(None), PathBuf::from("/run/user/1000/claimdag"));
-        });
-        with_env(None, None, || {
-            assert_eq!(resolve_dir(None), PathBuf::from("/tmp/claimdag"));
-        });
-        with_env(Some(""), Some(""), || {
-            assert_eq!(resolve_dir(None), PathBuf::from("/tmp/claimdag"));
-        });
-    }
 }

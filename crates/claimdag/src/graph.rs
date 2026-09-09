@@ -233,11 +233,7 @@ impl WorkGraph {
                 }
             })
             .collect();
-        v.sort_by(|a, b| {
-            b.updated_unix
-                .cmp(&a.updated_unix)
-                .then_with(|| a.id.hi.cmp(&b.id.hi).then(a.id.lo.cmp(&b.id.lo)))
-        });
+        v.sort_by(|a, b| b.updated_unix.cmp(&a.updated_unix).then(a.id.cmp(&b.id)));
         v
     }
 
@@ -520,7 +516,7 @@ impl WorkGraph {
             .map(|n| n.id)
             .collect();
         if !busy.is_empty() {
-            busy.sort_by(|a, b| a.hi.cmp(&b.hi).then(a.lo.cmp(&b.lo)));
+            busy.sort();
             let listed = busy
                 .iter()
                 .map(|held| held.to_hex())

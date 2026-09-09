@@ -1,0 +1,30 @@
+[package]
+name = "claimdag-tui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Terminal work graph over a claimdag work.bin"
+readme.workspace = true
+
+[[bin]]
+name = "claimdag-tui"
+path = "src/main.rs"
+
+[lib]
+name = "claimdag_tui"
+path = "src/lib.rs"
+
+[dependencies]
+claimdag.workspace = true
+clap.workspace = true
+ratatui = "0.30.2"
+serde_json.workspace = true
+# The seat's actor id is the truncated SHA-256 of user@host, and the ids
+# already written into work.bin were minted that way.
+sha2 = "0.10"
+
+[dev-dependencies]
+tempfile = "3"

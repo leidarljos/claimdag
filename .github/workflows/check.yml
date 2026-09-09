@@ -26,17 +26,26 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
 
-  tui:
+  front-ends:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-      # The pane drives the command line rather than reimplementing claim and
-      # complete, so it needs the binary the way a seat has it.
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.97.1
-      - run: cargo build --release -p claimdag-cli
-      - run: echo "$PWD/target/release" >> "$GITHUB_PATH"
-      - run: uv run --with '.[test]' pytest -q tests
+      - run: cargo build --release --workspace
+      # Both front ends read one directory, and the failure when they disagree
+      # about which is silent: each opens a work.bin and neither shows the
+      # other's work.
+      - name: One graph, both front ends
+        env:
+          CLAIMDAG_DIR: ${{ runner.temp }}/work
+        run: |
+          set -euo pipefail
+          mkdir -p "$CLAIMDAG_DIR"
+          bin=target/release
+          root=$("$bin/claimdag" upsert --summary "land the adapter")
+          "$bin/claimdag" upsert --summary "write the tree" --parent "$root" >/dev/null
+          "$bin/claimdag-tui" --dump | tee /dev/stderr | grep -q "  write the tree"
+          test "$("$bin/claimdag-tui" --dump | wc -l)" = 2

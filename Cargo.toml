@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/claimdag", "crates/claimdag-cli"]
+members = ["crates/claimdag", "crates/claimdag-cli", "crates/claimdag-tui"]
 
 [workspace.package]
 version = "0.1.0"

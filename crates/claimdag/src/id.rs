@@ -3,7 +3,7 @@
 use xxhash_rust::xxh3::xxh3_128;
 
 /// Wire id is two u64 halves (xxHash3-128). Zero = unset / mint.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct WorkId {
     pub hi: u64,
     pub lo: u64,
