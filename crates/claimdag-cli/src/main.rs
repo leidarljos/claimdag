@@ -179,6 +179,16 @@ fn print_get(n: &WorkNode) {
     println!("deps  {deps}");
 }
 
+/// Whether a verb only reads the graph.
+///
+/// A writer opening a directory with no graph in it is a cold start and has to
+/// work: the first claim on a seat is what creates the snapshot. A reader has
+/// nothing to create, so an absent graph is something it has to say rather
+/// than something it can answer around.
+fn reads_only(cmd: &Cmd) -> bool {
+    matches!(cmd, Cmd::List { .. } | Cmd::Get { .. })
+}
+
 fn main() {
     if let Err(e) = run() {
         eprintln!("{e}");
@@ -189,7 +199,14 @@ fn main() {
 fn run() -> Result<(), String> {
     let cli = Cli::parse();
     let dir = claimdag::resolve_dir(cli.dir.clone());
-    let mut g = WorkGraph::load_dir(&dir);
+    // A verb that only reads says when there is no graph to read. An empty
+    // list and a seat pointed at nothing look the same to a caller, and they
+    // mean opposite things: one is an answer, the other is a wrong question.
+    let mut g = if reads_only(&cli.cmd) {
+        WorkGraph::open_dir(&dir).map_err(|absent| absent.to_string())?
+    } else {
+        WorkGraph::load_dir(&dir)
+    };
     match cli.cmd {
         Cmd::List {
             terminal,

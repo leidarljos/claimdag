@@ -28,7 +28,16 @@ fn main() -> std::io::Result<()> {
     let cli = Cli::parse();
     let dir = claimdag::resolve_dir(cli.dir);
     if cli.dump {
-        let graph = WorkGraph::load_dir(&dir);
+        // `--dump` is a reading verb like the command line's, so it says when
+        // there is nothing at the directory rather than printing an empty
+        // forest that looks like a quiet seat.
+        let graph = match WorkGraph::open_dir(&dir) {
+            Ok(graph) => graph,
+            Err(absent) => {
+                eprintln!("{absent}");
+                std::process::exit(1);
+            }
+        };
         let nodes = graph.list_view(cli.all, cli.all);
         print!("{}", forest::dump(&nodes, &Handles::load(&dir)));
         return Ok(());

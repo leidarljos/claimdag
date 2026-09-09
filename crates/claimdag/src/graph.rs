@@ -5,7 +5,7 @@
 //! (mmap).
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::id::{mint_work_id, WorkId};
 
@@ -187,6 +187,44 @@ pub struct WorkGraph {
     next_seq: u64,
     mint_seq: u64,
 }
+
+/// Why a seat's work graph could not be read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Absent {
+    /// No directory at all: this seat has never had a graph here.
+    NoDirectory(PathBuf),
+    /// A directory with no snapshot in it.
+    NoSnapshot(PathBuf),
+    /// A snapshot that could not be parsed, and the reason given.
+    Unreadable(PathBuf, String),
+}
+
+impl std::fmt::Display for Absent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoDirectory(dir) => write!(
+                f,
+                "no work graph at {}: the directory does not exist, so nothing has been claimed on this seat. \
+                 Set CLAIMDAG_DIR, pass --dir, or claim something to create it",
+                dir.display()
+            ),
+            Self::NoSnapshot(dir) => write!(
+                f,
+                "no work graph at {}: the directory holds no {}. \
+                 Claim something to create it",
+                dir.display(),
+                crate::snap::SNAP_BIN
+            ),
+            Self::Unreadable(dir, why) => write!(
+                f,
+                "the work graph at {} could not be read: {why}",
+                dir.display()
+            ),
+        }
+    }
+}
+
+impl std::error::Error for Absent {}
 
 impl WorkGraph {
     pub fn now() -> u64 {
@@ -700,6 +738,31 @@ impl WorkGraph {
     }
 
     /// Load `$dir/work.bin` (mmap Cap'n), or empty if missing.
+    /// Why a directory holds no graph to read.
+    ///
+    /// The three cases read identically to a caller that gets an empty list,
+    /// and they mean different things: nothing claimed yet, no seat here at
+    /// all, and a snapshot that cannot be parsed. A writer treats all three as
+    /// a cold start, which is right. A reader answering "nothing is claimable"
+    /// from the second or third is answering a question it did not check.
+    pub fn open_dir(dir: &Path) -> Result<Self, Absent> {
+        if !dir.is_dir() {
+            return Err(Absent::NoDirectory(dir.to_path_buf()));
+        }
+        if !dir.join(crate::snap::SNAP_BIN).is_file() {
+            return Err(Absent::NoSnapshot(dir.to_path_buf()));
+        }
+        match crate::snap::read_bin(dir) {
+            Ok(_) => Ok(Self::load_dir(dir)),
+            Err(why) => Err(Absent::Unreadable(dir.to_path_buf(), why)),
+        }
+    }
+
+    /// The graph in a directory, empty when there is none.
+    ///
+    /// A writer's view: a seat with nothing claimed and a seat with no
+    /// directory are the same cold start to something about to write. Readers
+    /// want [`WorkGraph::open_dir`], which says which of the two it found.
     pub fn load_dir(dir: &Path) -> Self {
         match crate::snap::read_bin(dir) {
             Ok((next_seq, mint_seq, nodes)) => {
@@ -1046,6 +1109,55 @@ mod tests {
         let loaded = WorkGraph::load_dir(&dir);
         assert!(loaded.get(a).unwrap().archived);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    /// The three ways there is no graph, which a caller cannot tell apart from
+    /// an empty one and which mean different things.
+    #[test]
+    fn an_absent_graph_says_which_kind_of_absent() {
+        let base = std::env::temp_dir().join(format!("claimdag-absent-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+
+        let missing = base.join("never-existed");
+        assert_eq!(
+            WorkGraph::open_dir(&missing),
+            Err(Absent::NoDirectory(missing.clone()))
+        );
+        assert!(
+            WorkGraph::open_dir(&missing)
+                .unwrap_err()
+                .to_string()
+                .contains("nothing has been claimed"),
+            "the message has to say what to do about it"
+        );
+        // A writer still starts cold there, which is the whole reason the two
+        // views exist.
+        assert!(WorkGraph::load_dir(&missing).list().is_empty());
+
+        let empty = base.join("no-snapshot");
+        std::fs::create_dir_all(&empty).unwrap();
+        assert_eq!(
+            WorkGraph::open_dir(&empty),
+            Err(Absent::NoSnapshot(empty.clone()))
+        );
+
+        let broken = base.join("corrupt");
+        std::fs::create_dir_all(&broken).unwrap();
+        std::fs::write(broken.join(crate::snap::SNAP_BIN), b"not a snapshot").unwrap();
+        // The worst of the three: a graph that exists and cannot be read used
+        // to report as a graph with nothing in it.
+        assert!(matches!(
+            WorkGraph::open_dir(&broken),
+            Err(Absent::Unreadable(_, _))
+        ));
+
+        let good = base.join("real");
+        std::fs::create_dir_all(&good).unwrap();
+        WorkGraph::default().save_dir(&good).unwrap();
+        assert!(WorkGraph::open_dir(&good).unwrap().list().is_empty());
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
