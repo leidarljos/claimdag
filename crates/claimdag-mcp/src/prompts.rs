@@ -114,8 +114,11 @@ mod tests {
     #[tokio::test]
     async fn every_prompt_renders_from_what_it_declares() {
         let declared = ClaimdagServer::prompt_router().list_all();
-        let names: Vec<&str> = declared.iter().map(|p| p.name.as_str()).collect();
-        assert_eq!(names, ["take_the_next_node", "sweep_stale_claims"]);
+        // As a set: the router lists by name, and what matters is which
+        // prompts are declared rather than the order a listing returns them.
+        let mut names: Vec<&str> = declared.iter().map(|p| p.name.as_str()).collect();
+        names.sort_unstable();
+        assert_eq!(names, ["sweep_stale_claims", "take_the_next_node"]);
         for prompt in &declared {
             assert!(
                 prompt.description.as_ref().is_some_and(|d| !d.is_empty()),
