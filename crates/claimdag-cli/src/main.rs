@@ -61,6 +61,11 @@ enum Cmd {
         gen: Option<u64>,
     },
     /// Mark a node terminal (done, failed, or cancelled).
+    ///
+    /// Pass the --gen returned by claim to be refused if the lease was
+    /// reclaimed while the work was in flight. Omitting it finishes the node
+    /// whatever happened to the claim, which is the only way to speak for a
+    /// node nobody holds.
     Complete {
         id: String,
         #[arg(long, default_value = "done")]
@@ -69,6 +74,22 @@ enum Cmd {
         summary: String,
         #[arg(long, default_value = "00000000000000000000000000000000")]
         actor: String,
+        #[arg(long)]
+        gen: Option<u64>,
+    },
+    /// Say the holder is still working, moving the lease without changing hands.
+    Renew {
+        id: String,
+        #[arg(long, default_value = "00000000000000000000000000000000")]
+        actor: String,
+    },
+    /// Hand back every claim quiet for longer than the lease, in seconds.
+    ///
+    /// A claim with no expiry is a claim a crashed worker keeps, and the
+    /// holder's identity stays busy with it. This is what returns both.
+    Reclaim {
+        #[arg(long, default_value_t = 900)]
+        lease: u64,
     },
     /// Add a boolean hard dependency (parent before child).
     Link {
@@ -280,13 +301,32 @@ fn run() -> Result<(), String> {
             status,
             summary,
             actor,
+            gen,
         } => {
             let status =
                 WorkStatus::parse_str(&status).ok_or_else(|| format!("bad status {status}"))?;
             let id = parse_id(&id)?;
-            g.complete(id, status, &summary, parse_id(&actor)?, None)?;
+            g.complete(id, status, &summary, parse_id(&actor)?, gen)?;
             g.save_dir(&dir)?;
             println!("{}  {}", id.to_hex(), status.as_str());
+        }
+        Cmd::Renew { id, actor } => {
+            let id = parse_id(&id)?;
+            let cas = g.renew(id, parse_id(&actor)?)?;
+            g.save_dir(&dir)?;
+            println!("gen={cas}");
+        }
+        Cmd::Reclaim { lease } => {
+            let handed = g.reclaim(lease);
+            if !handed.is_empty() {
+                g.save_dir(&dir)?;
+            }
+            for id in &handed {
+                println!("{}  reclaimed", id.to_hex());
+            }
+            if handed.is_empty() {
+                println!("none");
+            }
         }
         Cmd::Link {
             parent,
