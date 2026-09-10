@@ -26,7 +26,7 @@ use std::path::PathBuf;
 use claimdag::{Absent, WorkGraph, WorkId, WorkNode, WorkStatus};
 use rmcp::{
     handler::server::wrapper::Json, handler::server::wrapper::Parameters,
-    handler::server::ServerHandler, model::*, tool, tool_handler, tool_router,
+    handler::server::ServerHandler, model::*, prompt_handler, tool, tool_handler, tool_router,
     ErrorData as McpError,
 };
 use serde::Serialize;
@@ -296,9 +296,15 @@ impl ClaimdagServer {
 }
 
 #[tool_handler]
+#[prompt_handler(router = Self::prompt_router())]
 impl ServerHandler for ClaimdagServer {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+        ServerInfo::new(
+            ServerCapabilities::builder()
+                .enable_tools()
+                .enable_prompts()
+                .build(),
+        )
             .with_server_info(Implementation::new("claimdag", env!("CARGO_PKG_VERSION")))
             .with_instructions(
                 "Ask what is claimable before doing anything else. A claim is a lease, not \

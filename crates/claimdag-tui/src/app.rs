@@ -52,8 +52,8 @@ pub struct App {
     pub lease: u64,
 }
 
-/// The lease the pane offers, in seconds, matching the command line's default.
-pub const DEFAULT_LEASE: u64 = 900;
+/// The lease the pane offers, which is the one every other seat means too.
+pub use claimdag::DEFAULT_LEASE_SECS as DEFAULT_LEASE;
 
 impl App {
     /// Open the pane on a directory.

@@ -88,7 +88,7 @@ enum Cmd {
     /// A claim with no expiry is a claim a crashed worker keeps, and the
     /// holder's identity stays busy with it. This is what returns both.
     Reclaim {
-        #[arg(long, default_value_t = 900)]
+        #[arg(long, default_value_t = claimdag::DEFAULT_LEASE_SECS)]
         lease: u64,
     },
     /// Add a boolean hard dependency (parent before child).

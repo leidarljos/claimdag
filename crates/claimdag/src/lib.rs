@@ -9,6 +9,7 @@ mod id;
 mod seat;
 mod snap;
 
+pub use graph::DEFAULT_LEASE_SECS;
 pub use graph::{
     Absent, WorkFields, WorkGraph, WorkKind, WorkLedgerEntry, WorkNode, WorkRole, WorkStatus,
     SNAP_FILE,

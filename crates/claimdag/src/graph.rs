@@ -9,6 +9,15 @@ use std::path::{Path, PathBuf};
 
 use crate::id::{mint_work_id, WorkId};
 
+/// How long a claim stands before anybody may take it back, in seconds.
+///
+/// Every seat that can reclaim has to mean the same thing by "quiet", or one
+/// of them takes back a node another still considers held. Fifteen minutes is
+/// long enough that a unit of work in progress is not swept out from under
+/// somebody, and short enough that a crashed worker does not hold a node and
+/// an identity for a sitting.
+pub const DEFAULT_LEASE_SECS: u64 = 900;
+
 /// Snapshot format written by this crate.
 pub const FORMAT_V1: &str = "claimdag/v1";
 
