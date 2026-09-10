@@ -284,7 +284,7 @@ fn run() -> Result<(), String> {
             let status =
                 WorkStatus::parse_str(&status).ok_or_else(|| format!("bad status {status}"))?;
             let id = parse_id(&id)?;
-            g.complete(id, status, &summary, parse_id(&actor)?)?;
+            g.complete(id, status, &summary, parse_id(&actor)?, None)?;
             g.save_dir(&dir)?;
             println!("{}  {}", id.to_hex(), status.as_str());
         }

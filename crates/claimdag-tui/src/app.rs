@@ -195,7 +195,7 @@ impl App {
         };
         let actor = self.actor;
         self.mutate("done", |graph| {
-            graph.complete(id, WorkStatus::Done, "", actor)
+            graph.complete(id, WorkStatus::Done, "", actor, None)
         });
     }
 

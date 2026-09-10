@@ -106,7 +106,7 @@ fn main() -> Result<(), String> {
                 made += 1;
                 graph.claim(id, assignee, None).expect("claim");
                 graph
-                    .complete(id, WorkStatus::Done, "", assignee)
+                    .complete(id, WorkStatus::Done, "", assignee, None)
                     .expect("complete");
             },
             3,

@@ -602,6 +602,73 @@ impl WorkGraph {
         Ok(cas_gen)
     }
 
+    /// Hand back every claim that has gone quiet for longer than the lease.
+    ///
+    /// A claim with no expiry is a claim a crashed worker keeps. The node
+    /// stays `Claimed` with nobody working it, and because occupancy allows
+    /// one held node per assignee, that worker's id can never claim anything
+    /// again either. One process dying takes a node and an identity with it,
+    /// permanently, which is not a property a scheduler can have.
+    ///
+    /// So a claim is a lease. `renew` says the holder is alive; going quiet
+    /// past `lease_secs` returns the node to `Ready` for somebody else. The
+    /// generation moves on the way out, which is what fences the holder that
+    /// wakes up later still believing it owns the node.
+    ///
+    /// Leases rather than heartbeat-and-evict because the graph has one
+    /// mutator and no way to ask whether a worker is alive: the only evidence
+    /// available is whether it said so recently. Chubby's lease and
+    /// ZooKeeper's ephemeral node answer the same question the same way.
+    ///
+    /// Returns the nodes handed back, oldest first.
+    pub fn reclaim(&mut self, lease_secs: u64) -> Vec<WorkId> {
+        let now = Self::now();
+        let mut stale: Vec<(u64, WorkId)> = self
+            .nodes
+            .values()
+            .filter(|n| matches!(n.status, WorkStatus::Claimed | WorkStatus::Running))
+            .filter(|n| now.saturating_sub(n.updated_unix) >= lease_secs)
+            .map(|n| (n.updated_unix, n.id))
+            .collect();
+        stale.sort_unstable();
+        let mut handed = Vec::with_capacity(stale.len());
+        for (_, id) in stale {
+            let Some(node) = self.nodes.get_mut(&id) else {
+                continue;
+            };
+            let holder = node.assignee;
+            node.status = WorkStatus::Ready;
+            node.assignee = WorkId::ZERO;
+            node.cas_gen = node.cas_gen.saturating_add(1);
+            node.updated_unix = now;
+            // The ledger records the holder that lost it rather than a
+            // reclaiming actor, because there is no actor: the lease ran out.
+            self.push_ledger(id, holder, "reclaim");
+            handed.push(id);
+        }
+        handed
+    }
+
+    /// The holder says it is still working.
+    ///
+    /// Moves the lease forward and nothing else. The generation deliberately
+    /// stays put: a renewal is not a change of ownership, and bumping it would
+    /// invalidate the token the holder is about to complete with.
+    pub fn renew(&mut self, id: WorkId, actor: WorkId) -> Result<u64, String> {
+        let node = self
+            .nodes
+            .get_mut(&id)
+            .ok_or_else(|| "renew: not found".to_string())?;
+        if !matches!(node.status, WorkStatus::Claimed | WorkStatus::Running) {
+            return Err(format!("renew: status {}", node.status.as_str()));
+        }
+        if !node.assignee.is_zero() && !actor.is_zero() && node.assignee != actor {
+            return Err("renew: not assignee".into());
+        }
+        node.updated_unix = Self::now();
+        Ok(node.cas_gen)
+    }
+
     pub fn set_running(&mut self, id: WorkId, actor: WorkId) -> Result<(), String> {
         let node = self
             .nodes
@@ -622,12 +689,25 @@ impl WorkGraph {
         Ok(())
     }
 
+    /// Finish a node, optionally fencing on the generation held at claim time.
+    ///
+    /// `expected_gen` is a fencing token. A holder that stalled long enough to
+    /// be reclaimed wakes up believing it still owns the node, and the
+    /// assignee check alone does not stop it: a reclaim clears the assignee,
+    /// and a cleared assignee is what lets anybody finish an unheld node. The
+    /// generation moves on every claim and every reclaim, so a caller that
+    /// passes the one it was given is refused exactly when the world moved
+    /// underneath it.
+    ///
+    /// `None` skips the check, which is the command line's escape and the only
+    /// way to speak for a node nobody claimed.
     pub fn complete(
         &mut self,
         id: WorkId,
         status: WorkStatus,
         summary: &str,
         actor: WorkId,
+        expected_gen: Option<u64>,
     ) -> Result<(), String> {
         if !status.is_terminal() {
             return Err("complete: status not terminal".into());
@@ -640,6 +720,11 @@ impl WorkGraph {
             .nodes
             .get_mut(&id)
             .ok_or_else(|| "complete: not found".to_string())?;
+        if let Some(g) = expected_gen {
+            if node.cas_gen != g {
+                return Err("complete: gen mismatch".into());
+            }
+        }
         // Whoever held it is who may still speak for it. The guard runs before
         // the terminal case, not after: a finished node is exactly the one a
         // stranger would otherwise be able to rewrite, since the early return
@@ -829,7 +914,7 @@ mod tests {
         .unwrap();
         g.link_dep(a, b, id(9)).unwrap();
         assert!(g.claim(b, id(10), None).is_err());
-        g.complete(a, WorkStatus::Done, "ok", id(10)).unwrap();
+        g.complete(a, WorkStatus::Done, "ok", id(10), None).unwrap();
         assert_eq!(g.get(b).unwrap().status, WorkStatus::Ready);
         assert_eq!(g.get(b).unwrap().cas_gen, 1);
         assert_eq!(
@@ -843,7 +928,8 @@ mod tests {
         );
         assert!(g.claim(b, id(11), Some(cas_gen)).is_err());
         g.set_running(b, id(10)).unwrap();
-        g.complete(b, WorkStatus::Done, "done", id(10)).unwrap();
+        g.complete(b, WorkStatus::Done, "done", id(10), None)
+            .unwrap();
         assert!(g.verify().is_ok());
     }
 
@@ -852,7 +938,7 @@ mod tests {
         let mut g = WorkGraph::default();
         let a = id(1);
         upsert_ready(&mut g, a, "cite:TICKET-compwrite do the work");
-        g.complete(a, WorkStatus::Done, "", id(9)).unwrap();
+        g.complete(a, WorkStatus::Done, "", id(9), None).unwrap();
         let n = g.get(a).unwrap();
         assert_eq!(n.status, WorkStatus::Done);
         assert_eq!(n.summary, "cite:TICKET-compwrite do the work");
@@ -912,7 +998,7 @@ mod tests {
             "Running still occupies; got {running_err}"
         );
         assert!(running_err.contains(&a.to_hex()), "{running_err}");
-        g.complete(a, WorkStatus::Done, "ok", x).unwrap();
+        g.complete(a, WorkStatus::Done, "ok", x, None).unwrap();
         g.claim(c, x, None).unwrap();
         assert_eq!(g.get(c).unwrap().status, WorkStatus::Claimed);
         assert_eq!(g.get(c).unwrap().assignee, x);
@@ -1062,7 +1148,7 @@ mod tests {
             },
         )
         .unwrap();
-        g.complete(a, WorkStatus::Done, "done on disk", id(9))
+        g.complete(a, WorkStatus::Done, "done on disk", id(9), None)
             .unwrap();
         g.save_dir(&dir).unwrap();
         let loaded = WorkGraph::load_dir(&dir);
@@ -1091,7 +1177,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(g.archive(a, id(9)).unwrap_err(), "archive: not terminal");
-        g.complete(a, WorkStatus::Done, "done", id(9)).unwrap();
+        g.complete(a, WorkStatus::Done, "done", id(9), None)
+            .unwrap();
         assert_eq!(g.list_view(false, false).len(), 0);
         assert_eq!(g.list_view(true, false).len(), 1);
         g.archive(a, id(9)).unwrap();
@@ -1111,7 +1198,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    #[test]
     /// The three ways there is no graph, which a caller cannot tell apart from
     /// an empty one and which mean different things.
     #[test]
@@ -1120,10 +1206,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
 
         let missing = base.join("never-existed");
-        assert_eq!(
+        assert!(matches!(
             WorkGraph::open_dir(&missing),
-            Err(Absent::NoDirectory(missing.clone()))
-        );
+            Err(Absent::NoDirectory(ref at)) if *at == missing
+        ));
         assert!(
             WorkGraph::open_dir(&missing)
                 .unwrap_err()
@@ -1137,10 +1223,10 @@ mod tests {
 
         let empty = base.join("no-snapshot");
         std::fs::create_dir_all(&empty).unwrap();
-        assert_eq!(
+        assert!(matches!(
             WorkGraph::open_dir(&empty),
-            Err(Absent::NoSnapshot(empty.clone()))
-        );
+            Err(Absent::NoSnapshot(ref at)) if *at == empty
+        ));
 
         let broken = base.join("corrupt");
         std::fs::create_dir_all(&broken).unwrap();
@@ -1243,7 +1329,8 @@ mod tests {
         let mut g = WorkGraph::default();
         let a = id(1);
         upsert_ready(&mut g, a, "A");
-        g.complete(a, WorkStatus::Done, "done", id(9)).unwrap();
+        g.complete(a, WorkStatus::Done, "done", id(9), None)
+            .unwrap();
         assert_eq!(g.get(a).unwrap().status, WorkStatus::Done);
         let err = g
             .upsert(
@@ -1263,7 +1350,7 @@ mod tests {
         assert_eq!(after_upsert.status, WorkStatus::Done);
         assert_eq!(after_upsert.summary, "done");
         assert_eq!(g.claim(a, id(10), None).unwrap_err(), "claim: status done");
-        g.complete(a, WorkStatus::Failed, "still done", id(9))
+        g.complete(a, WorkStatus::Failed, "still done", id(9), None)
             .unwrap();
         let after_complete = g.get(a).unwrap();
         assert_eq!(after_complete.status, WorkStatus::Done);
@@ -1271,7 +1358,8 @@ mod tests {
 
         let b = id(2);
         upsert_ready(&mut g, b, "B");
-        g.complete(b, WorkStatus::Cancelled, "nope", id(9)).unwrap();
+        g.complete(b, WorkStatus::Cancelled, "nope", id(9), None)
+            .unwrap();
         assert_eq!(
             g.upsert(
                 b,

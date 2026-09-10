@@ -83,10 +83,10 @@ fn a_terminal_summary_is_not_rewritable_by_a_stranger() {
     let holder = actor(7);
     graph.claim(node, holder, None).expect("claim");
     graph
-        .complete(node, WorkStatus::Done, "what happened", holder)
+        .complete(node, WorkStatus::Done, "what happened", holder, None)
         .expect("complete");
 
-    let rewritten = graph.complete(node, WorkStatus::Done, "something else", actor(9));
+    let rewritten = graph.complete(node, WorkStatus::Done, "something else", actor(9), None);
     let summary = graph
         .get(node)
         .map(|n| n.summary.clone())
@@ -155,7 +155,7 @@ fn completing_a_dependency_readies_what_waited_on_it() {
     let holder = actor(7);
     graph.claim(blocker, holder, None).expect("claim");
     graph
-        .complete(blocker, WorkStatus::Done, "", holder)
+        .complete(blocker, WorkStatus::Done, "", holder, None)
         .expect("complete");
     assert_eq!(
         graph.get(blocked).map(|n| n.status),
@@ -175,7 +175,7 @@ fn a_failed_dependency_does_not_ready_what_waited_on_it() {
     let holder = actor(7);
     graph.claim(blocker, holder, None).expect("claim");
     graph
-        .complete(blocker, WorkStatus::Failed, "", holder)
+        .complete(blocker, WorkStatus::Failed, "", holder, None)
         .expect("complete");
     assert_eq!(
         graph.get(blocked).map(|n| n.status),
@@ -258,4 +258,80 @@ fn a_node_can_be_moved_under_a_different_parent() {
     reparent(&mut graph, leaf, second);
     assert_eq!(graph.get(leaf).expect("leaf").parent, second);
     graph.verify().expect("still a forest");
+}
+
+/// A worker that dies holding a claim must not take the node with it.
+///
+/// Without a lease the node stays `Claimed` forever with nobody on it, and the
+/// dead worker's id stays busy forever too, because occupancy allows one held
+/// node per assignee. One crash would cost a node and an identity permanently.
+#[test]
+fn a_claim_that_goes_quiet_comes_back() {
+    let mut graph = WorkGraph::default();
+    let node = ready(&mut graph, "the work");
+    let holder = actor(7);
+    graph.claim(node, holder, None).expect("claim");
+
+    // Still held while the lease is alive.
+    assert!(graph.reclaim(3600).is_empty(), "reclaimed a live claim");
+    assert_eq!(graph.get(node).expect("node").status, WorkStatus::Claimed);
+
+    // A zero lease is every claim being past it, which is how this is tested
+    // without waiting: the graph's clock is the wall clock.
+    let handed = graph.reclaim(0);
+    assert_eq!(handed, vec![node]);
+    let back = graph.get(node).expect("node");
+    assert_eq!(back.status, WorkStatus::Ready);
+    assert!(back.assignee.is_zero(), "still assigned to the dead holder");
+
+    // And the identity is free again, which it was not before.
+    let other = ready(&mut graph, "more work");
+    graph
+        .claim(other, holder, None)
+        .expect("the holder is free");
+}
+
+/// The holder that wakes up after losing its lease cannot finish the work.
+///
+/// The assignee check alone does not stop it: a reclaim clears the assignee,
+/// and a cleared assignee is exactly what lets anybody speak for a node. The
+/// generation is the fence.
+#[test]
+fn a_holder_that_lost_its_lease_is_fenced_out() {
+    let mut graph = WorkGraph::default();
+    let node = ready(&mut graph, "the work");
+    let holder = actor(7);
+    let held_gen = graph.claim(node, holder, None).expect("claim");
+
+    graph.reclaim(0);
+
+    // The token it was given no longer matches, so the stale finish is
+    // refused, and the node is still there for whoever takes it next.
+    let stale = graph.complete(node, WorkStatus::Done, "did it", holder, Some(held_gen));
+    assert!(stale.is_err(), "a fenced holder finished the work");
+    assert_eq!(graph.get(node).expect("node").status, WorkStatus::Ready);
+
+    // The next holder finishes with its own token.
+    let next = actor(8);
+    let fresh = graph.claim(node, next, None).expect("claim");
+    graph
+        .complete(node, WorkStatus::Done, "did it", next, Some(fresh))
+        .expect("the live holder finishes");
+}
+
+/// Renewal keeps a claim without changing hands, so the token stays good.
+#[test]
+fn renewing_holds_the_lease_without_moving_the_generation() {
+    let mut graph = WorkGraph::default();
+    let node = ready(&mut graph, "the work");
+    let holder = actor(7);
+    let held_gen = graph.claim(node, holder, None).expect("claim");
+
+    assert_eq!(graph.renew(node, holder).expect("renew"), held_gen);
+    // A stranger cannot renew somebody else's lease.
+    assert!(graph.renew(node, actor(9)).is_err());
+    // And the token still finishes the work.
+    graph
+        .complete(node, WorkStatus::Done, "", holder, Some(held_gen))
+        .expect("the renewed holder finishes");
 }
