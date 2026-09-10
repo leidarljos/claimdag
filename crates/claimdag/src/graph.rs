@@ -501,6 +501,113 @@ impl WorkGraph {
         false
     }
 
+    /// How long a chain still waits below each node.
+    ///
+    /// A scheduler handing out one ready node at a time has to answer which
+    /// one, and the answer since Hu (doi:10.1287/opre.9.6.841) is the head of
+    /// the longest chain of remaining work. Starting a leaf nothing waits on,
+    /// while the head of a chain of nine sits ready, delays all nine by
+    /// however long the leaf takes; Graham (doi:10.1137/0117039) is what
+    /// bounds how bad a list schedule can be, and every priority in the DAG
+    /// scheduling literature since (doi:10.1145/344588.344618, and HEFT at
+    /// doi:10.1109/71.993206) is a refinement of this one.
+    ///
+    /// The cost model is unit, because the graph carries no durations. Every
+    /// remaining node counts one, which is the case Hu's result covers and the
+    /// honest model for what this stores. A node with nothing unfinished below
+    /// it has depth zero.
+    ///
+    /// Done and archived nodes are not below anything: what is already
+    /// finished cannot delay what waits on it.
+    #[must_use]
+    pub fn critical_depth(&self) -> HashMap<WorkId, u32> {
+        // Successors, since the nodes carry their parents. Built once rather
+        // than scanned per node, which would make this quadratic on a graph
+        // that is usually shallow and wide.
+        let mut below: HashMap<WorkId, Vec<WorkId>> = HashMap::new();
+        for node in self.nodes.values() {
+            if node.archived || node.status.is_terminal() {
+                continue;
+            }
+            for dep in &node.deps {
+                below.entry(*dep).or_default().push(node.id);
+            }
+        }
+
+        let mut depth: HashMap<WorkId, u32> = HashMap::new();
+        for id in self.nodes.keys() {
+            Self::depth_below(*id, &below, &mut depth, &mut Vec::new());
+        }
+        depth
+    }
+
+    /// One node's depth, memoised, with the path held so a cycle terminates.
+    ///
+    /// The graph refuses a cycle on the way in, so this cannot happen through
+    /// the API. It is still written to terminate on one, because a walk that
+    /// diverges on a corrupt file is a scheduler that hangs rather than one
+    /// that reports a corrupt file.
+    fn depth_below(
+        id: WorkId,
+        below: &HashMap<WorkId, Vec<WorkId>>,
+        depth: &mut HashMap<WorkId, u32>,
+        walking: &mut Vec<WorkId>,
+    ) -> u32 {
+        if let Some(held) = depth.get(&id) {
+            return *held;
+        }
+        if walking.contains(&id) {
+            return 0;
+        }
+        walking.push(id);
+        let deepest = below
+            .get(&id)
+            .map(|kids| {
+                kids.iter()
+                    .map(|kid| 1 + Self::depth_below(*kid, below, depth, walking))
+                    .max()
+                    .unwrap_or(0)
+            })
+            .unwrap_or(0);
+        walking.pop();
+        depth.insert(id, deepest);
+        deepest
+    }
+
+    /// The nodes a seat may take right now, deepest chain first.
+    ///
+    /// Ready is unblocked and unfinished, which is the same predicate `claim`
+    /// enforces, so a surface that filters for itself can drift from what the
+    /// graph will actually accept. This is the one definition.
+    ///
+    /// The order is the scheduling decision: critical depth first, then the
+    /// most recently touched, then the id. Recency is a tie-break rather than
+    /// the sort, because the most recently touched ready node is usually the
+    /// one somebody just created or just unblocked, which says nothing about
+    /// what waits on it.
+    #[must_use]
+    pub fn ready_view(&self) -> Vec<&WorkNode> {
+        let depth = self.critical_depth();
+        let mut open: Vec<&WorkNode> = self
+            .nodes
+            .values()
+            .filter(|n| !n.archived)
+            .filter(|n| matches!(n.status, WorkStatus::Ready | WorkStatus::Todo))
+            .filter(|n| self.deps_satisfied(n))
+            .collect();
+        open.sort_by(|a, b| {
+            let (here, there) = (
+                depth.get(&a.id).copied().unwrap_or(0),
+                depth.get(&b.id).copied().unwrap_or(0),
+            );
+            there
+                .cmp(&here)
+                .then_with(|| b.updated_unix.cmp(&a.updated_unix))
+                .then_with(|| a.id.cmp(&b.id))
+        });
+        open
+    }
+
     fn deps_satisfied(&self, node: &WorkNode) -> bool {
         node.deps.iter().all(|d| {
             self.nodes
@@ -1103,6 +1210,104 @@ mod tests {
             )
             .unwrap();
         assert!(!id.is_zero());
+    }
+
+    /// The head of a long chain outranks a leaf nothing waits on, however
+    /// recently the leaf was touched.
+    ///
+    /// This is the whole reason the order is not recency. Handing out the leaf
+    /// first delays every node in the chain by however long the leaf takes,
+    /// and nothing anywhere would report that it happened.
+    #[test]
+    fn a_deep_chain_outranks_a_leaf_touched_later() {
+        let mut g = WorkGraph::default();
+        let make = |g: &mut WorkGraph, at: u64| {
+            let node = id(at);
+            g.upsert(
+                node,
+                WorkFields {
+                    kind: WorkKind::Task,
+                    status: WorkStatus::Ready,
+                    role: WorkRole::Unset,
+                    parent: WorkId::ZERO,
+                    actor: id(99),
+                    summary: "x",
+                },
+            )
+            .unwrap();
+            node
+        };
+
+        // A chain of four, head first, and a leaf beside it.
+        let chain: Vec<WorkId> = (1..=4).map(|at| make(&mut g, at)).collect();
+        for pair in chain.windows(2) {
+            g.link_dep(pair[0], pair[1], id(99)).unwrap();
+        }
+        let leaf = make(&mut g, 9);
+
+        // The leaf is the most recently touched, which is exactly what the old
+        // order sorted by.
+        if let Some(node) = g.nodes.get_mut(&leaf) {
+            node.updated_unix = u64::MAX;
+        }
+
+        let depth = g.critical_depth();
+        assert_eq!(depth.get(&chain[0]).copied(), Some(3));
+        assert_eq!(depth.get(&chain[3]).copied(), Some(0));
+        assert_eq!(depth.get(&leaf).copied(), Some(0));
+
+        // Only the head and the leaf are unblocked, and the head goes first.
+        let ready: Vec<WorkId> = g.ready_view().into_iter().map(|n| n.id).collect();
+        assert_eq!(ready, vec![chain[0], leaf], "recency won over the chain");
+
+        // Finishing the head moves the frontier down the chain, and what is
+        // already done stops counting toward anybody's depth.
+        g.claim(chain[0], id(99), None).unwrap();
+        g.complete(chain[0], WorkStatus::Done, "", id(99), None)
+            .unwrap();
+        let depth = g.critical_depth();
+        assert_eq!(depth.get(&chain[1]).copied(), Some(2));
+        let ready: Vec<WorkId> = g.ready_view().into_iter().map(|n| n.id).collect();
+        assert_eq!(ready, vec![chain[1], leaf]);
+    }
+
+    /// The ready view is the predicate `claim` enforces, not a second one.
+    ///
+    /// Two definitions of ready is one that drifts, and the surface that
+    /// drifts offers work the graph then refuses.
+    #[test]
+    fn everything_ready_can_actually_be_claimed() {
+        let mut g = WorkGraph::default();
+        let mut made = Vec::new();
+        for at in 1..=5u64 {
+            let node = id(at);
+            g.upsert(
+                node,
+                WorkFields {
+                    kind: WorkKind::Task,
+                    status: WorkStatus::Ready,
+                    role: WorkRole::Unset,
+                    parent: WorkId::ZERO,
+                    actor: id(50),
+                    summary: "x",
+                },
+            )
+            .unwrap();
+            made.push(node);
+        }
+        g.link_dep(made[0], made[1], id(50)).unwrap();
+        g.link_dep(made[2], made[3], id(50)).unwrap();
+
+        let ready: Vec<WorkId> = g.ready_view().into_iter().map(|n| n.id).collect();
+        assert!(!ready.contains(&made[1]), "an unblocked node was offered");
+        assert!(!ready.contains(&made[3]), "an unblocked node was offered");
+        // Each one a fresh assignee, since occupancy allows one held node per
+        // identity and that is a different refusal from an unsatisfied dep.
+        for (nth, node) in ready.iter().enumerate() {
+            let taker = id(100 + nth as u64);
+            g.claim(*node, taker, None)
+                .unwrap_or_else(|e| panic!("ready offered {node:?} and claim refused it: {e}"));
+        }
     }
 
     #[test]

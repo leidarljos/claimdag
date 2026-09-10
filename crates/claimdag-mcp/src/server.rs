@@ -59,6 +59,12 @@ pub struct NodeRow {
     /// reclaim needs it, and a status of `claimed` reads the same whether the
     /// holder is working or gone.
     pub quiet_seconds: Option<u64>,
+    /// How long a chain of unfinished work still waits below this node.
+    ///
+    /// This is why the ready list is in the order it is in. A node with three
+    /// below it outranks a leaf with none, however recently the leaf was
+    /// touched, because starting the leaf delays all three.
+    pub waiting_below: u32,
 }
 
 /// What a claim gave out.
@@ -71,7 +77,7 @@ pub struct ClaimRow {
     pub generation: u64,
 }
 
-fn row(node: &WorkNode, now: u64) -> NodeRow {
+fn row(node: &WorkNode, now: u64, waiting_below: u32) -> NodeRow {
     let held = matches!(node.status, WorkStatus::Claimed | WorkStatus::Running);
     NodeRow {
         id: node.id.to_hex(),
@@ -81,6 +87,7 @@ fn row(node: &WorkNode, now: u64) -> NodeRow {
         generation: node.cas_gen,
         blocked_by: node.deps.iter().map(|d| d.to_hex()).collect(),
         quiet_seconds: held.then(|| now.saturating_sub(node.updated_unix)),
+        waiting_below,
     }
 }
 
@@ -126,7 +133,7 @@ impl ClaimdagServer {
     }
 
     #[tool(
-        description = "Work that can be taken right now: unblocked, unheld, and not finished. Ask this before anything else. An empty answer means the seat is quiet; a failure means there is no graph here, which is a different thing.",
+        description = "Work that can be taken right now: unblocked, unheld, and not finished, deepest chain first. Take the first one: the order is the critical path, so the head of a long chain outranks a leaf nothing waits on. Ask this before anything else. An empty answer means the seat is quiet; a failure means there is no graph here, which is a different thing.",
         annotations(
             title = "Claimable work",
             read_only_hint = true,
@@ -136,19 +143,15 @@ impl ClaimdagServer {
     async fn claimdag_ready(&self) -> Result<Json<Vec<NodeRow>>, McpError> {
         let graph = self.reading()?;
         let now = now_unix();
-        let done: std::collections::HashSet<WorkId> = graph
-            .list()
-            .iter()
-            .filter(|n| n.status == WorkStatus::Done)
-            .map(|n| n.id)
-            .collect();
+        // The core's view, not a filter written again here. Two definitions of
+        // ready is one that will drift from what `claim` accepts, and the
+        // order is a scheduling decision rather than a presentation one.
+        let depth = graph.critical_depth();
         Ok(Json(
             graph
-                .list_view(false, false)
+                .ready_view()
                 .into_iter()
-                .filter(|n| matches!(n.status, WorkStatus::Ready | WorkStatus::Todo))
-                .filter(|n| n.deps.iter().all(|d| done.contains(d)))
-                .map(|n| row(n, now))
+                .map(|n| row(n, now, depth.get(&n.id).copied().unwrap_or(0)))
                 .collect(),
         ))
     }
@@ -168,11 +171,12 @@ impl ClaimdagServer {
         let graph = self.reading()?;
         let now = now_unix();
         let all = args.all.unwrap_or(false);
+        let depth = graph.critical_depth();
         Ok(Json(
             graph
                 .list_view(all, all)
                 .into_iter()
-                .map(|n| row(n, now))
+                .map(|n| row(n, now, depth.get(&n.id).copied().unwrap_or(0)))
                 .collect(),
         ))
     }
@@ -266,10 +270,14 @@ impl ClaimdagServer {
             .map_err(bad)?;
         graph.save_dir(&self.dir).map_err(bad)?;
         let now = now_unix();
+        let depth = graph.critical_depth();
         let node = graph
             .get(id)
             .ok_or_else(|| bad("complete: the node went missing".into()))?;
-        Ok(Json(row(node, now)))
+        // A finished node has nothing unfinished below it that it is holding
+        // up, which is exactly what the depth of zero says.
+        let below = depth.get(&node.id).copied().unwrap_or(0);
+        Ok(Json(row(node, now, below)))
     }
 
     #[tool(
