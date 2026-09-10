@@ -305,15 +305,15 @@ impl ServerHandler for ClaimdagServer {
                 .enable_prompts()
                 .build(),
         )
-            .with_server_info(Implementation::new("claimdag", env!("CARGO_PKG_VERSION")))
-            .with_instructions(
-                "Ask what is claimable before doing anything else. A claim is a lease, not \
+        .with_server_info(Implementation::new("claimdag", env!("CARGO_PKG_VERSION")))
+        .with_instructions(
+            "Ask what is claimable before doing anything else. A claim is a lease, not \
                  a fact: claim hands back a generation, renew keeps the lease without \
                  changing it, and complete takes it so a finish is refused if the lease was \
                  reclaimed while you were away. Carry the generation between calls. This \
                  schedules work for one session and does not outlive it; what has to \
                  survive belongs in the tracker.",
-            )
+        )
     }
 }
 

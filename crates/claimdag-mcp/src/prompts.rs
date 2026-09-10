@@ -41,8 +41,7 @@ fn asked(text: String) -> Vec<PromptMessage> {
     vec![PromptMessage::new_text(Role::User, text)]
 }
 
-
-#[prompt_router(vis = pub(crate))]
+#[prompt_router(vis = "pub(crate)")]
 impl ClaimdagServer {
     /// Take the next claimable node and work it under a lease, carrying the
     /// generation from the claim through to the finish.
@@ -155,7 +154,10 @@ mod tests {
             .expect("renders");
         let said = format!("{:?}", default[0].content);
         assert!(said.contains("the seat's own identity"), "{said}");
-        assert!(said.contains(&format!("{DEFAULT_LEASE} second lease")), "{said}");
+        assert!(
+            said.contains(&format!("{DEFAULT_LEASE} second lease")),
+            "{said}"
+        );
 
         let swept = server
             .sweep_stale_claims_prompt(Parameters(SweepArgs {
