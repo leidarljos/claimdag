@@ -41,6 +41,8 @@ fn dir_from(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
     use super::*;
 
     #[test]
@@ -79,8 +81,23 @@ mod tests {
         assert_ne!(picked, PathBuf::from("."));
     }
 
+    /// Serialises the tests that write the two variables the resolver reads.
+    ///
+    /// Cargo runs these in one process across threads, and the variables are
+    /// process globals, so without this three tests take turns writing the
+    /// same two values and read whatever the interleaving leaves. That does
+    /// not only invent failures: it hides real ones just as easily, since a
+    /// resolver that ignored its input would still see the value some other
+    /// test happened to set.
+    static ENV: Mutex<()> = Mutex::new(());
+
     /// Run a closure with the two variables this resolver reads set.
+    ///
+    /// The lock is held across the set, the read, and the restore. Holding it
+    /// only for the set would leave the read racing the next test's set, which
+    /// is the whole failure.
     fn with_env<T>(claimdag: Option<&str>, runtime: Option<&str>, f: impl FnOnce() -> T) -> T {
+        let _guard = ENV.lock().unwrap_or_else(|e| e.into_inner());
         let old_c = std::env::var_os("CLAIMDAG_DIR");
         let old_r = std::env::var_os("XDG_RUNTIME_DIR");
         match claimdag {

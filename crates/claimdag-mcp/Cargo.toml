@@ -1,0 +1,23 @@
+[package]
+name = "claimdag-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Model Context Protocol server over a claim graph: what is claimable, who holds what, and the lease on it"
+
+[[bin]]
+name = "claimdag-mcp"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+claimdag = { path = "../claimdag" }
+rmcp = { version = "3.2", features = ["server", "transport-io", "transport-async-rw", "macros"] }
+schemars = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std", "signal"] }
+
+[dev-dependencies]
+tempfile = "3"
