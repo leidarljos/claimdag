@@ -24,7 +24,7 @@ pub enum Action {
 
 /// The bindings, as drawn in the footer.
 pub const HELP: &str =
-    "c claim  d done  a archive  u unlink  h done?  A archived?  r reload  q quit";
+    "c claim  d done  R reclaim  a archive  u unlink  h done?  A archived?  r reload  q quit";
 
 /// The work graph pane.
 #[derive(Debug)]
@@ -44,7 +44,16 @@ pub struct App {
     pub message: String,
     /// What the files looked like at the last reload.
     stamp: u128,
+    /// How long a claim may go quiet before the pane will hand it back.
+    ///
+    /// A pane's lease is not the graph's: the graph has none, it takes one per
+    /// call. This is the number the operator is acting on when they press the
+    /// key, so it lives beside the key rather than in the library.
+    pub lease: u64,
 }
+
+/// The lease the pane offers, in seconds, matching the command line's default.
+pub const DEFAULT_LEASE: u64 = 900;
 
 impl App {
     /// Open the pane on a directory.
@@ -61,6 +70,7 @@ impl App {
             show_archived: false,
             message: String::new(),
             stamp: 0,
+            lease: DEFAULT_LEASE,
         };
         app.reload();
         app
@@ -161,6 +171,7 @@ impl App {
             KeyCode::Char('d') => self.complete(),
             KeyCode::Char('a') => self.archive(),
             KeyCode::Char('u') => self.unlink(),
+            KeyCode::Char('R') => self.reclaim(),
             _ => {}
         }
         Action::Continue
@@ -186,6 +197,34 @@ impl App {
         // No generation: the pane claims what it is looking at, and the graph
         // still refuses one already held by somebody else.
         self.mutate("claimed", |graph| graph.claim(id, actor, None).map(|_| ()));
+    }
+
+    /// Hand back every claim quiet longer than the lease.
+    ///
+    /// The pane already shows how long a held node has been quiet, and an
+    /// operator watching a stalled claim had to leave the pane to act on what
+    /// the pane was telling them.
+    ///
+    /// Every stale claim rather than the selected one, because the lease is
+    /// the rule and applying it to one node is a judgement the lease already
+    /// made. What is selected has nothing to do with which claims went quiet.
+    fn reclaim(&mut self) {
+        // Not through `mutate`, because the count has to come back out and a
+        // closure that owns it cannot hand it over.
+        let mut graph = WorkGraph::load_dir(&self.dir);
+        let handed = graph.reclaim(self.lease);
+        self.message = if handed.is_empty() {
+            format!("nothing has been quiet for {}s", self.lease)
+        } else {
+            match graph.save_dir(&self.dir) {
+                Err(why) => why,
+                Ok(()) => match handed.len() {
+                    1 => "handed back 1 claim".to_string(),
+                    n => format!("handed back {n} claims"),
+                },
+            }
+        };
+        self.reload();
     }
 
     fn complete(&mut self) {
@@ -379,5 +418,101 @@ mod tests {
         let mut app = App::open(dir.path().to_path_buf(), actor());
         app.handle_key(key(KeyCode::Char('u')));
         assert_eq!(app.message, "no edge");
+    }
+}
+
+#[cfg(test)]
+mod reclaim_tests {
+    use super::*;
+    use claimdag::{WorkFields, WorkKind, WorkRole};
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    /// The pane can act on the stall it is showing, without leaving the pane.
+    #[test]
+    fn the_pane_hands_back_a_claim_it_shows_as_quiet() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let holder = WorkId { hi: 7, lo: 7 };
+        let mut graph = WorkGraph::default();
+        let node = graph
+            .upsert(
+                WorkId::ZERO,
+                WorkFields {
+                    kind: WorkKind::Task,
+                    status: claimdag::WorkStatus::Ready,
+                    role: WorkRole::Implementor,
+                    parent: WorkId::ZERO,
+                    actor: holder,
+                    summary: "the work",
+                },
+            )
+            .expect("upsert");
+        graph.claim(node, holder, None).expect("claim");
+        graph.save_dir(dir.path()).expect("save");
+
+        let mut app = App::open(dir.path().to_path_buf(), holder);
+        // A live lease is not reclaimed, and the pane says so rather than
+        // reporting a count of zero as if something happened.
+        app.handle_key(key(KeyCode::Char('R')));
+        assert!(
+            app.message.contains("nothing has been quiet"),
+            "{}",
+            app.message
+        );
+        assert_eq!(
+            WorkGraph::load_dir(dir.path())
+                .get(node)
+                .expect("node")
+                .status,
+            claimdag::WorkStatus::Claimed
+        );
+
+        // A zero lease is every claim past it, which is how this is tested
+        // without waiting.
+        app.lease = 0;
+        app.handle_key(key(KeyCode::Char('R')));
+        assert!(app.message.contains("handed back 1"), "{}", app.message);
+        assert_eq!(
+            WorkGraph::load_dir(dir.path())
+                .get(node)
+                .expect("node")
+                .status,
+            claimdag::WorkStatus::Ready
+        );
+    }
+
+    /// A held node says how long it has been quiet, because the decision to
+    /// hand it back cannot be made from a status that reads the same either
+    /// way.
+    #[test]
+    fn a_held_node_shows_how_long_it_has_been_quiet() {
+        let mut graph = WorkGraph::default();
+        let holder = WorkId { hi: 3, lo: 3 };
+        let node = graph
+            .upsert(
+                WorkId::ZERO,
+                WorkFields {
+                    kind: WorkKind::Task,
+                    status: claimdag::WorkStatus::Ready,
+                    role: WorkRole::Implementor,
+                    parent: WorkId::ZERO,
+                    actor: holder,
+                    summary: "the work",
+                },
+            )
+            .expect("upsert");
+        let ready = graph.get(node).expect("node").clone();
+        assert!(
+            crate::forest::quiet_for(&ready).is_none(),
+            "unheld work is not quiet"
+        );
+
+        graph.claim(node, holder, None).expect("claim");
+        let held = graph.get(node).expect("node").clone();
+        let quiet = crate::forest::quiet_for(&held).expect("a held node is quiet for a time");
+        assert!(quiet.ends_with('s'), "{quiet}");
     }
 }

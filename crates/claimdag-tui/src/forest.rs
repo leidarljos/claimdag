@@ -6,7 +6,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use claimdag::{WorkId, WorkNode};
+use claimdag::{WorkId, WorkNode, WorkStatus};
 
 use crate::handles::Handles;
 
@@ -69,7 +69,33 @@ pub fn label(node: &WorkNode, handles: &Handles) -> String {
     if node.archived {
         line.push_str("  archived");
     }
+    // How long a held node has been quiet. The decision to hand a claim back
+    // is a judgement about whether somebody is still on it, and an operator
+    // cannot make it from a status that says `claimed` either way.
+    if let Some(quiet) = quiet_for(node) {
+        line.push_str(&format!("  quiet {quiet}"));
+    }
     line
+}
+
+/// How long since a held node was touched, in the coarsest unit that is still
+/// true, or nothing when the node is not held.
+#[must_use]
+pub fn quiet_for(node: &WorkNode) -> Option<String> {
+    if !matches!(node.status, WorkStatus::Claimed | WorkStatus::Running) {
+        return None;
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let seconds = now.saturating_sub(node.updated_unix);
+    Some(match seconds {
+        s if s < 60 => format!("{s}s"),
+        s if s < 3600 => format!("{}m", s / 60),
+        s if s < 86400 => format!("{}h", s / 3600),
+        s => format!("{}d", s / 86400),
+    })
 }
 
 /// Walk the forest into drawable rows, depth first.
