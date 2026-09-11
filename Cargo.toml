@@ -12,8 +12,8 @@ version = "0.3.0"
 edition = "2021"
 rust-version = "1.85"
 license = "Apache-2.0 OR MIT"
-repository = "https://github.com/HaoZeke/claimdag"
-homepage = "https://github.com/HaoZeke/claimdag"
+repository = "https://github.com/leidarljos/claimdag"
+homepage = "https://leidarljos.github.io/claimdag/"
 description = "CAS claim and complete on a DAG"
 readme = "README.md"
 
@@ -24,4 +24,4 @@ xxhash-rust = { version = "0.8", features = ["xxh3"] }
 clap = { version = "4", features = ["derive"] }
 capnp = "0.20"
 memmap2 = "0.9"
-claimdag = { path = "crates/claimdag" }
+claimdag = { path = "crates/claimdag", version = "0.3.0" }
