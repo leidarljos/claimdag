@@ -93,6 +93,12 @@ enum Cmd {
         #[arg(long, default_value = "00000000000000000000000000000000")]
         actor: String,
     },
+    /// Bring a finished node back to ready, generation moved, so the same work can be taken again.
+    Reopen {
+        id: String,
+        #[arg(long, default_value = "00000000000000000000000000000000")]
+        actor: String,
+    },
     /// Hand back every claim quiet for longer than the lease, in seconds.
     ///
     /// A claim with no expiry is a claim a crashed worker keeps, and the
@@ -337,6 +343,12 @@ fn run() -> Result<(), String> {
         Cmd::Release { id, actor } => {
             let id = parse_id(&id)?;
             let cas = g.release(id, parse_id(&actor)?)?;
+            g.save_dir(&dir)?;
+            println!("gen={cas}");
+        }
+        Cmd::Reopen { id, actor } => {
+            let id = parse_id(&id)?;
+            let cas = g.reopen(id, parse_id(&actor)?)?;
             g.save_dir(&dir)?;
             println!("gen={cas}");
         }

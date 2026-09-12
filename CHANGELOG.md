@@ -2,6 +2,12 @@
 
 Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 
+## Unreleased
+
+- `reopen ID [--actor ID]` and `claimdag_reopen`: a terminal node comes
+  back to ready with the generation moved, so a tracker id that maps to
+  one node can be sat on again. The ledger keeps the earlier completion.
+
 ## 0.5.0 (2026-09-12)
 
 - `release ID [--actor ID]` and the MCP `claimdag_release`: hand one claim

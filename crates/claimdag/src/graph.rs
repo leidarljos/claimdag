@@ -728,6 +728,27 @@ impl WorkGraph {
         Ok(generation)
     }
 
+    /// Bring a terminal node back to `ready`, generation moved, so work on
+    /// the same tracker id can be taken again. The ledger keeps the earlier
+    /// completion; this is a new sitting on old work, not an erasure.
+    pub fn reopen(&mut self, id: WorkId, actor: WorkId) -> Result<u64, String> {
+        let node = self
+            .nodes
+            .get_mut(&id)
+            .ok_or_else(|| "reopen: not found".to_string())?;
+        if !node.status.is_terminal() {
+            return Err(format!("reopen: status {} is not terminal", node.status.as_str()));
+        }
+        node.status = WorkStatus::Ready;
+        node.assignee = WorkId::ZERO;
+        node.archived = false;
+        node.cas_gen = node.cas_gen.saturating_add(1);
+        node.updated_unix = Self::now();
+        let generation = node.cas_gen;
+        self.push_ledger(id, actor, "reopen");
+        Ok(generation)
+    }
+
     /// Move the lease forward. The generation stays: a renewal is not a change
     /// of ownership.
     pub fn renew(&mut self, id: WorkId, actor: WorkId) -> Result<u64, String> {
@@ -1093,6 +1114,28 @@ mod tests {
             .unwrap_err()
             .starts_with("release: status ready"));
         assert_eq!(g.ledger.back().unwrap().op, "release");
+    }
+
+    /// A finished node can be reopened and claimed again; a live one cannot
+    /// be reopened.
+    #[test]
+    fn reopen_brings_a_terminal_node_back_to_ready() {
+        let mut g = WorkGraph::default();
+        let a = id(1);
+        let x = id(20);
+        upsert_ready(&mut g, a, "A");
+        assert!(g.reopen(a, x).unwrap_err().contains("not terminal"));
+        g.claim(a, x, None).unwrap();
+        g.complete(a, WorkStatus::Cancelled, "paused", x, None).unwrap();
+        assert!(g.claim(a, x, None).is_err(), "a terminal node is not claimable");
+        let generation = g.reopen(a, x).unwrap();
+        let node = g.get(a).unwrap();
+        assert_eq!(node.status, WorkStatus::Ready);
+        assert!(node.assignee.is_zero());
+        assert_eq!(node.cas_gen, generation);
+        g.claim(a, x, None).unwrap();
+        assert_eq!(g.get(a).unwrap().status, WorkStatus::Claimed);
+        assert_eq!(g.ledger.iter().filter(|e| e.op == "reopen").count(), 1);
     }
 
     #[test]

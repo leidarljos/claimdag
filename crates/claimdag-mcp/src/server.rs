@@ -233,6 +233,32 @@ impl ClaimdagServer {
     }
 
     #[tool(
+        description = "Bring a finished node back to ready, generation moved, so the same work can be claimed again: a new sitting on old work. The ledger keeps the earlier completion. Refused on a node that is not terminal.",
+        annotations(
+            title = "Reopen finished work",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn claimdag_reopen(
+        &self,
+        Parameters(args): Parameters<ActorArgs>,
+    ) -> Result<Json<ClaimRow>, McpError> {
+        let id = parse(&args.id)?;
+        let actor = parse(&args.actor)?;
+        let _lock = claimdag::lock_dir(&self.dir).map_err(bad)?;
+        let mut graph = WorkGraph::load_dir(&self.dir);
+        let generation = graph.reopen(id, actor).map_err(bad)?;
+        graph.save_dir(&self.dir).map_err(bad)?;
+        Ok(Json(ClaimRow {
+            id: id.to_hex(),
+            generation,
+        }))
+    }
+
+    #[tool(
         description = "Finish a node. Pass the generation claim gave you: without it the finish goes through even if your lease was reclaimed and somebody else has the work. Terminal is sticky.",
         annotations(
             title = "Finish work",
@@ -390,6 +416,7 @@ mod tests {
                 "claimdag_reclaim".to_string(),
                 "claimdag_release".to_string(),
                 "claimdag_renew".to_string(),
+                "claimdag_reopen".to_string(),
             ]
         );
     }
