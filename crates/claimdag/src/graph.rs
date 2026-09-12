@@ -737,7 +737,10 @@ impl WorkGraph {
             .get_mut(&id)
             .ok_or_else(|| "reopen: not found".to_string())?;
         if !node.status.is_terminal() {
-            return Err(format!("reopen: status {} is not terminal", node.status.as_str()));
+            return Err(format!(
+                "reopen: status {} is not terminal",
+                node.status.as_str()
+            ));
         }
         node.status = WorkStatus::Ready;
         node.assignee = WorkId::ZERO;
@@ -1126,8 +1129,12 @@ mod tests {
         upsert_ready(&mut g, a, "A");
         assert!(g.reopen(a, x).unwrap_err().contains("not terminal"));
         g.claim(a, x, None).unwrap();
-        g.complete(a, WorkStatus::Cancelled, "paused", x, None).unwrap();
-        assert!(g.claim(a, x, None).is_err(), "a terminal node is not claimable");
+        g.complete(a, WorkStatus::Cancelled, "paused", x, None)
+            .unwrap();
+        assert!(
+            g.claim(a, x, None).is_err(),
+            "a terminal node is not claimable"
+        );
         let generation = g.reopen(a, x).unwrap();
         let node = g.get(a).unwrap();
         assert_eq!(node.status, WorkStatus::Ready);
