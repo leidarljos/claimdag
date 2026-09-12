@@ -271,7 +271,7 @@ dependencies = [
 
 [[package]]
 name = "claimdag"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "capnp",
  "criterion",
@@ -282,7 +282,7 @@ dependencies = [
 
 [[package]]
 name = "claimdag-cli"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "claimdag",
  "clap",
@@ -291,7 +291,7 @@ dependencies = [
 
 [[package]]
 name = "claimdag-mcp"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "claimdag",
@@ -305,7 +305,7 @@ dependencies = [
 
 [[package]]
 name = "claimdag-tui"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "claimdag",
  "clap",

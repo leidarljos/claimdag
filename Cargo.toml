@@ -8,7 +8,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 rust-version = "1.85"
 license = "Apache-2.0 OR MIT"
@@ -24,4 +24,4 @@ xxhash-rust = { version = "0.8", features = ["xxh3"] }
 clap = { version = "4", features = ["derive"] }
 capnp = "0.20"
 memmap2 = "0.9"
-claimdag = { path = "crates/claimdag", version = "0.4.0" }
+claimdag = { path = "crates/claimdag", version = "0.5.0" }

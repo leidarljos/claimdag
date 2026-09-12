@@ -2,7 +2,7 @@
 
 Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 
-## Unreleased
+## 0.5.0 (2026-09-12)
 
 - `release ID [--actor ID]` and the MCP `claimdag_release`: hand one claim
   back before the work is terminal. Ready again, assignee cleared,
