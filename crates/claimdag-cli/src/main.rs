@@ -83,6 +83,16 @@ enum Cmd {
         #[arg(long, default_value = "00000000000000000000000000000000")]
         actor: String,
     },
+    /// Hand one claim back on purpose: ready again, assignee cleared, generation moved.
+    ///
+    /// The way off a claim before the work is terminal. A holder that stops
+    /// without this stays busy until the lease runs out, and cannot claim
+    /// anything else meanwhile.
+    Release {
+        id: String,
+        #[arg(long, default_value = "00000000000000000000000000000000")]
+        actor: String,
+    },
     /// Hand back every claim quiet for longer than the lease, in seconds.
     ///
     /// A claim with no expiry is a claim a crashed worker keeps, and the
@@ -321,6 +331,12 @@ fn run() -> Result<(), String> {
         Cmd::Renew { id, actor } => {
             let id = parse_id(&id)?;
             let cas = g.renew(id, parse_id(&actor)?)?;
+            g.save_dir(&dir)?;
+            println!("gen={cas}");
+        }
+        Cmd::Release { id, actor } => {
+            let id = parse_id(&id)?;
+            let cas = g.release(id, parse_id(&actor)?)?;
             g.save_dir(&dir)?;
             println!("gen={cas}");
         }

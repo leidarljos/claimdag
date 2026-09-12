@@ -16,6 +16,7 @@ $ claimdag --dir /var/lib/seat upsert --summary "land the adapter"
 $ claimdag --dir /var/lib/seat list
 $ claimdag --dir /var/lib/seat list --json --all
 $ claimdag --dir /var/lib/seat claim <id> --assignee <actor>
+$ claimdag --dir /var/lib/seat release <id> --actor <actor>   # hand it back unfinished
 $ claimdag --dir /var/lib/seat complete <id>
 $ claimdag --dir /var/lib/seat archive <id>
 $ claimdag --dir /var/lib/seat link <parent> <child>

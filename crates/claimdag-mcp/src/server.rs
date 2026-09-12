@@ -207,6 +207,32 @@ impl ClaimdagServer {
     }
 
     #[tool(
+        description = "Hand one claim back on purpose before the work is terminal: the node is ready again, the assignee clears, and the generation moves so the token you held is fenced. Call this when you stop working on a node without finishing it; until you do, you stay busy and cannot claim anything else.",
+        annotations(
+            title = "Hand a claim back",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn claimdag_release(
+        &self,
+        Parameters(args): Parameters<ActorArgs>,
+    ) -> Result<Json<ClaimRow>, McpError> {
+        let id = parse(&args.id)?;
+        let actor = parse(&args.actor)?;
+        let _lock = claimdag::lock_dir(&self.dir).map_err(bad)?;
+        let mut graph = WorkGraph::load_dir(&self.dir);
+        let generation = graph.release(id, actor).map_err(bad)?;
+        graph.save_dir(&self.dir).map_err(bad)?;
+        Ok(Json(ClaimRow {
+            id: id.to_hex(),
+            generation,
+        }))
+    }
+
+    #[tool(
         description = "Finish a node. Pass the generation claim gave you: without it the finish goes through even if your lease was reclaimed and somebody else has the work. Terminal is sticky.",
         annotations(
             title = "Finish work",
@@ -362,6 +388,7 @@ mod tests {
                 "claimdag_claim".to_string(),
                 "claimdag_complete".to_string(),
                 "claimdag_reclaim".to_string(),
+                "claimdag_release".to_string(),
                 "claimdag_renew".to_string(),
             ]
         );

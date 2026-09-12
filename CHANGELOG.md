@@ -2,6 +2,13 @@
 
 Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 
+## Unreleased
+
+- `release ID [--actor ID]` and the MCP `claimdag_release`: hand one claim
+  back before the work is terminal. Ready again, assignee cleared,
+  generation moved. A holder that stops without it stays busy until the
+  lease runs out.
+
 ## 0.4.0 (2026-09-12)
 
 What a user gets:

@@ -703,6 +703,31 @@ impl WorkGraph {
         handed
     }
 
+    /// Hand one claim back on purpose. The node returns to `ready`, the
+    /// assignee clears, and the generation moves, exactly as a reclaim does:
+    /// the holder chose to stop before the lease ran out. Only the holder may
+    /// do it; a zero actor is the command line's escape.
+    pub fn release(&mut self, id: WorkId, actor: WorkId) -> Result<u64, String> {
+        let node = self
+            .nodes
+            .get_mut(&id)
+            .ok_or_else(|| "release: not found".to_string())?;
+        if !matches!(node.status, WorkStatus::Claimed | WorkStatus::Running) {
+            return Err(format!("release: status {}", node.status.as_str()));
+        }
+        if !node.assignee.is_zero() && !actor.is_zero() && node.assignee != actor {
+            return Err("release: not assignee".into());
+        }
+        let holder = node.assignee;
+        node.status = WorkStatus::Ready;
+        node.assignee = WorkId::ZERO;
+        node.cas_gen = node.cas_gen.saturating_add(1);
+        node.updated_unix = Self::now();
+        let generation = node.cas_gen;
+        self.push_ledger(id, holder, "release");
+        Ok(generation)
+    }
+
     /// Move the lease forward. The generation stays: a renewal is not a change
     /// of ownership.
     pub fn renew(&mut self, id: WorkId, actor: WorkId) -> Result<u64, String> {
@@ -1033,6 +1058,35 @@ mod tests {
         g.claim(c, x, None).unwrap();
         assert_eq!(g.get(c).unwrap().status, WorkStatus::Claimed);
         assert_eq!(g.get(c).unwrap().assignee, x);
+    }
+
+    /// A holder that stops on purpose hands the node back: ready, no
+    /// assignee, generation moved, and the same holder is free to claim again.
+    #[test]
+    fn release_hands_a_claim_back_and_frees_the_holder() {
+        let mut g = WorkGraph::default();
+        let a = id(1);
+        let b = id(2);
+        let x = id(20);
+        let y = id(21);
+        upsert_ready(&mut g, a, "A");
+        upsert_ready(&mut g, b, "B");
+        g.claim(a, x, None).unwrap();
+        assert!(g.claim(b, x, None).unwrap_err().starts_with("claim: assignee busy"));
+        // A stranger cannot hand back somebody else's work.
+        assert_eq!(g.release(a, y).unwrap_err(), "release: not assignee");
+        let generation = g.release(a, x).unwrap();
+        let after = g.get(a).unwrap();
+        assert_eq!(after.status, WorkStatus::Ready);
+        assert!(after.assignee.is_zero());
+        assert_eq!(after.cas_gen, generation);
+        assert_eq!(generation, 3, "claim moved it to 2, release to 3");
+        // The holder is free, and the released node is claimable by anyone.
+        g.claim(b, x, None).unwrap();
+        g.claim(a, y, None).unwrap();
+        assert!(g.release(b, x).is_ok());
+        assert!(g.release(b, x).unwrap_err().starts_with("release: status ready"));
+        assert_eq!(g.ledger.back().unwrap().op, "release");
     }
 
     #[test]

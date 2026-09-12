@@ -10,6 +10,8 @@ A claim with no expiry is a claim a crashed worker keeps. The node stays
 claimed with nobody on it, and because one assignee has at most one live
 node, that worker's identity can never claim again either. One process
 dying takes a node and an identity with it for good. So a claim is a lease:
+=release= hands a claim back on purpose, moving the generation the way a
+reclaim does, so a holder that stops is not busy until the lease runs out.
 =renew= says the holder is alive, and going quiet past the lease returns the
 node to ready for somebody else. Chubby's leases and ZooKeeper's ephemeral
 nodes answer the same question the same way; the graph has one mutator and
