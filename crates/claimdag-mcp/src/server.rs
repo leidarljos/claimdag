@@ -170,6 +170,7 @@ impl ClaimdagServer {
     ) -> Result<Json<ClaimRow>, McpError> {
         let id = parse(&args.id)?;
         let assignee = parse(&args.assignee)?;
+        let _lock = claimdag::lock_dir(&self.dir).map_err(bad)?;
         let mut graph = WorkGraph::load_dir(&self.dir);
         let generation = graph.claim(id, assignee, args.generation).map_err(bad)?;
         graph.save_dir(&self.dir).map_err(bad)?;
@@ -195,6 +196,7 @@ impl ClaimdagServer {
     ) -> Result<Json<ClaimRow>, McpError> {
         let id = parse(&args.id)?;
         let actor = parse(&args.actor)?;
+        let _lock = claimdag::lock_dir(&self.dir).map_err(bad)?;
         let mut graph = WorkGraph::load_dir(&self.dir);
         let generation = graph.renew(id, actor).map_err(bad)?;
         graph.save_dir(&self.dir).map_err(bad)?;
@@ -231,6 +233,7 @@ impl ClaimdagServer {
                 ));
             }
         };
+        let _lock = claimdag::lock_dir(&self.dir).map_err(bad)?;
         let mut graph = WorkGraph::load_dir(&self.dir);
         graph
             .complete(
@@ -267,6 +270,7 @@ impl ClaimdagServer {
         &self,
         Parameters(args): Parameters<ReclaimArgs>,
     ) -> Result<Json<Vec<String>>, McpError> {
+        let _lock = claimdag::lock_dir(&self.dir).map_err(bad)?;
         let mut graph = WorkGraph::load_dir(&self.dir);
         let handed = graph.reclaim(args.lease_seconds);
         if !handed.is_empty() {
