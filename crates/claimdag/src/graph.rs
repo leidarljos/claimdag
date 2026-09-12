@@ -1072,7 +1072,10 @@ mod tests {
         upsert_ready(&mut g, a, "A");
         upsert_ready(&mut g, b, "B");
         g.claim(a, x, None).unwrap();
-        assert!(g.claim(b, x, None).unwrap_err().starts_with("claim: assignee busy"));
+        assert!(g
+            .claim(b, x, None)
+            .unwrap_err()
+            .starts_with("claim: assignee busy"));
         // A stranger cannot hand back somebody else's work.
         assert_eq!(g.release(a, y).unwrap_err(), "release: not assignee");
         let generation = g.release(a, x).unwrap();
@@ -1085,7 +1088,10 @@ mod tests {
         g.claim(b, x, None).unwrap();
         g.claim(a, y, None).unwrap();
         assert!(g.release(b, x).is_ok());
-        assert!(g.release(b, x).unwrap_err().starts_with("release: status ready"));
+        assert!(g
+            .release(b, x)
+            .unwrap_err()
+            .starts_with("release: status ready"));
         assert_eq!(g.ledger.back().unwrap().op, "release");
     }
 
