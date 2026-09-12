@@ -1,0 +1,85 @@
+=========
+Reference
+=========
+
+
+
+Command line
+------------
+
+``claimdag [--dir DIR] VERB``
+
+.. table::
+
+    +-----------------------------------------------------------------------------------------------------+--------------------------------------------------------+
+    | Verb                                                                                                | Does                                                   |
+    +=====================================================================================================+========================================================+
+    | ``upsert [--id ID] [--kind K] [--status S] [--role R] [--parent ID] [--summary TEXT] [--actor ID]`` | create (mint when ``--id`` is absent) or update a node |
+    +-----------------------------------------------------------------------------------------------------+--------------------------------------------------------+
+    | ``get ID``                                                                                          | one node with its dependencies                         |
+    +-----------------------------------------------------------------------------------------------------+--------------------------------------------------------+
+    | ``list [--terminal] [--archived] [--all] [--json]``                                                 | nodes, newest first; live work by default              |
+    +-----------------------------------------------------------------------------------------------------+--------------------------------------------------------+
+    | ``claim ID --assignee ID [--gen N]``                                                                | compare-and-swap claim; prints the new generation      |
+    +-----------------------------------------------------------------------------------------------------+--------------------------------------------------------+
+    | ``renew ID [--actor ID]``                                                                           | move the lease, keep the generation                    |
+    +-----------------------------------------------------------------------------------------------------+--------------------------------------------------------+
+    | ``complete ID [--status done\vert failed\vert cancelled] [--summary TEXT] [--actor ID] [--gen N]``  | terminal; refused when ``--gen`` is stale              |
+    +-----------------------------------------------------------------------------------------------------+--------------------------------------------------------+
+    | ``reclaim [--lease SECS]``                                                                          | hand back every claim quiet longer than the lease      |
+    +-----------------------------------------------------------------------------------------------------+--------------------------------------------------------+
+    | ``link PARENT CHILD`` / ``unlink PARENT CHILD``                                                     | a hard dependency                                      |
+    +-----------------------------------------------------------------------------------------------------+--------------------------------------------------------+
+    | ``archive ID`` / ``unarchive ID``                                                                   | hide or show a terminal node                           |
+    +-----------------------------------------------------------------------------------------------------+--------------------------------------------------------+
+
+Ids are 32 lowercase hex characters (xxHash3-128). The zero id means unset.
+
+Statuses
+--------
+
+``todo``, ``ready``, ``claimed``, ``done``, ``failed``, ``cancelled``. ``ready`` is
+derived: a ``todo`` node whose every dependency is terminal. A claim requires
+``ready``. One live claim per assignee.
+
+Kinds and roles
+---------------
+
+Kinds: ``task`` and the closed set the schema names. Roles: ``unset`` and the
+closed set the schema names. Summary is the one open text field.
+
+The snapshot
+------------
+
+``work.bin`` in the graph directory: an unpacked Cap'n Proto message, mapped
+read-only by readers and rewritten whole by the one mutating process. A
+directory with no file is an empty graph to a writer and "no graph here" to
+a reader.
+
+Environment
+-----------
+
+.. table::
+
+    +------------------+---------------------------------------------------------+
+    | Variable         | Meaning                                                 |
+    +==================+=========================================================+
+    | ``CLAIMDAG_DIR`` | the graph directory; else ``$XDG_RUNTIME_DIR/claimdag`` |
+    +------------------+---------------------------------------------------------+
+
+Crates
+------
+
+.. table::
+
+    +------------------+-----------------------------------------------------+
+    | Crate            | Carries                                             |
+    +==================+=====================================================+
+    | ``claimdag``     | the graph, ids, leases, critical path, the snapshot |
+    +------------------+-----------------------------------------------------+
+    | ``claimdag-cli`` | ``claimdag``                                        |
+    +------------------+-----------------------------------------------------+
+    | ``claimdag-tui`` | the pane, on icedtea                                |
+    +------------------+-----------------------------------------------------+
+    | ``claimdag-mcp`` | the Model Context Protocol (MCP) surface            |
+    +------------------+-----------------------------------------------------+

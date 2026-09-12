@@ -1,0 +1,69 @@
+=====================
+claimdag architecture
+=====================
+
+
+One writer. Unpacked Cap'n on disk. Hosts mmap ``work.bin``.
+
+Law
+---
+
+- The host process is the sole mutator.
+
+- The schema is claimdag's. This crate has no RPC surface.
+
+- Ids are 128-bit ``WorkId``. Kind, status, and role are closed enums.
+
+- Summary is the only open text field.
+
+- Terminal status is sticky. ``archive`` is a flag, not a status.
+
+Not a record
+------------
+
+claimdag holds the work one host process is handing out now. The snapshot lives
+in the runtime directory, is capped at 4096 nodes, and prunes finished work to
+stay under the cap. Nothing here outlives the session that wrote it.
+
+A plain-text issue tracker models the same shape: parent, hard dependency,
+holder, derived workable set, sticky terminal state. The two are not redundant,
+because the tempos differ. A record is edited by people and kept in version
+control. A scheduler is compare-and-swap over an mmap. The rule for picking is
+the tempo: if the answer has to survive the session, it belongs in the tracker.
+
+A ``WorkNode`` therefore has no field for a deed accession and is not getting one.
+An accession crosses durable stores. A graph that prunes its own finished nodes
+cannot be an end of a citation without lying about it later. A node names what
+it schedules instead, by opening ``summary`` with the tracker id. That is a
+convention and not a schema change.
+
+Split
+-----
+
+.. table::
+
+    +---------------------------+---------------------------------+
+    | Piece                     | Role                            |
+    +===========================+=================================+
+    | ``schema/claimdag.capnp`` | Snap / node / id                |
+    +---------------------------+---------------------------------+
+    | ``crates/claimdag``       | DAG, CAS, mmap load             |
+    +---------------------------+---------------------------------+
+    | ``crates/claimdag-cli``   | ``claimdag`` over a directory   |
+    +---------------------------+---------------------------------+
+    | ``claimdag_tui``          | Textual tree; mutations via CLI |
+    +---------------------------+---------------------------------+
+
+Disk
+----
+
+- Write: atomic replace of ``$dir/work.bin`` (unpacked Cap'n).
+
+- Read: mmap ``work.bin``.
+
+- Default ``list`` / TUI: live nodes only (not terminal, not archived).
+
+Not this crate
+--------------
+
+This crate is the team DAG only. Memory and ledger stores stay out.
