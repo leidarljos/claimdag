@@ -314,10 +314,6 @@ impl WorkGraph {
     }
 
     /// What an upsert is asserting about a node.
-    ///
-    /// Eight positional arguments where five of them describe the same node is
-    /// a call nobody can read at the site, and two ids of the same type next to
-    /// each other is a swap waiting to happen.
     pub fn upsert(&mut self, mut id: WorkId, fields: WorkFields<'_>) -> Result<WorkId, String> {
         let WorkFields {
             kind,
@@ -330,10 +326,8 @@ impl WorkGraph {
         if id.is_zero() {
             id = self.mint_id(kind, parent, summary);
         }
-        // The parent chain is a forest and nothing else enforced that. A
-        // dependency edge is checked for a loop and a parent edge was not, so
-        // `upsert --id X --parent X` was accepted and any reader that walks up
-        // from a node, or draws the tree, ran forever on it.
+        // The parent chain is a forest: a parent edge is loop-checked as a
+        // dependency edge is.
         if !parent.is_zero() && (parent == id || self.parent_reaches(parent, id)) {
             return Err("upsert: parent cycle".into());
         }
@@ -397,10 +391,7 @@ impl WorkGraph {
         }
         entry.updated_unix = now;
         let wid = entry.id;
-        // Readiness is derived, never asserted: a caller may ask for Ready and
-        // the dependencies decide. Otherwise the status lies to every reader
-        // who uses it to pick up workable work, and the claim being refused
-        // later does not help the one who believed it.
+        // Readiness is derived, never asserted: the dependencies decide.
         self.recompute_ready(wid);
         self.push_ledger(wid, actor, "upsert");
         self.prune();
@@ -474,10 +465,7 @@ impl WorkGraph {
         false
     }
 
-    /// Whether walking up from `from` reaches `target`.
-    ///
-    /// Bounded by the visited set rather than by depth, because a chain that
-    /// is already circular is exactly the input this has to survive.
+    /// Whether walking up from `from` reaches `target`; bounded by a visited set.
     fn parent_reaches(&self, from: WorkId, target: WorkId) -> bool {
         let mut at = from;
         let mut seen = HashSet::new();
@@ -684,24 +672,8 @@ impl WorkGraph {
         Ok(cas_gen)
     }
 
-    /// Hand back every claim that has gone quiet for longer than the lease.
-    ///
-    /// A claim with no expiry is a claim a crashed worker keeps. The node
-    /// stays `Claimed` with nobody working it, and because occupancy allows
-    /// one held node per assignee, that worker's id can never claim anything
-    /// again either. One process dying takes a node and an identity with it,
-    /// permanently, which is not a property a scheduler can have.
-    ///
-    /// So a claim is a lease. `renew` says the holder is alive; going quiet
-    /// past `lease_secs` returns the node to `Ready` for somebody else. The
-    /// generation moves on the way out, which is what fences the holder that
-    /// wakes up later still believing it owns the node.
-    ///
-    /// Leases rather than heartbeat-and-evict because the graph has one
-    /// mutator and no way to ask whether a worker is alive: the only evidence
-    /// available is whether it said so recently. Chubby's lease and
-    /// ZooKeeper's ephemeral node answer the same question the same way.
-    ///
+    /// Return every claim quiet for longer than `lease_secs` to `Ready`,
+    /// bumping the generation so a holder that wakes later is fenced.
     /// Returns the nodes handed back, oldest first.
     pub fn reclaim(&mut self, lease_secs: u64) -> Vec<WorkId> {
         let now = Self::now();
@@ -731,11 +703,8 @@ impl WorkGraph {
         handed
     }
 
-    /// The holder says it is still working.
-    ///
-    /// Moves the lease forward and nothing else. The generation deliberately
-    /// stays put: a renewal is not a change of ownership, and bumping it would
-    /// invalidate the token the holder is about to complete with.
+    /// Move the lease forward. The generation stays: a renewal is not a change
+    /// of ownership.
     pub fn renew(&mut self, id: WorkId, actor: WorkId) -> Result<u64, String> {
         let node = self
             .nodes
@@ -771,18 +740,9 @@ impl WorkGraph {
         Ok(())
     }
 
-    /// Finish a node, optionally fencing on the generation held at claim time.
-    ///
-    /// `expected_gen` is a fencing token. A holder that stalled long enough to
-    /// be reclaimed wakes up believing it still owns the node, and the
-    /// assignee check alone does not stop it: a reclaim clears the assignee,
-    /// and a cleared assignee is what lets anybody finish an unheld node. The
-    /// generation moves on every claim and every reclaim, so a caller that
-    /// passes the one it was given is refused exactly when the world moved
-    /// underneath it.
-    ///
-    /// `None` skips the check, which is the command line's escape and the only
-    /// way to speak for a node nobody claimed.
+    /// Finish a node. `expected_gen` is the fencing token from the claim: the
+    /// generation moves on every claim and reclaim, so a stale holder is
+    /// refused. `None` skips the check.
     pub fn complete(
         &mut self,
         id: WorkId,
@@ -807,10 +767,8 @@ impl WorkGraph {
                 return Err("complete: gen mismatch".into());
             }
         }
-        // Whoever held it is who may still speak for it. The guard runs before
-        // the terminal case, not after: a finished node is exactly the one a
-        // stranger would otherwise be able to rewrite, since the early return
-        // used to be reached first.
+        // Whoever held it may still speak for it; checked before the terminal
+        // case so a stranger cannot rewrite a finished node.
         if !node.assignee.is_zero() && !actor.is_zero() && node.assignee != actor {
             return Err("complete: not assignee".into());
         }
@@ -904,14 +862,8 @@ impl WorkGraph {
         Ok(())
     }
 
-    /// Load `$dir/work.bin` (mmap Cap'n), or empty if missing.
-    /// Why a directory holds no graph to read.
-    ///
-    /// The three cases read identically to a caller that gets an empty list,
-    /// and they mean different things: nothing claimed yet, no seat here at
-    /// all, and a snapshot that cannot be parsed. A writer treats all three as
-    /// a cold start, which is right. A reader answering "nothing is claimable"
-    /// from the second or third is answering a question it did not check.
+    /// The graph in a directory, or why there is none: no directory, an
+    /// unreadable snapshot, or an empty graph. Readers need the difference.
     pub fn open_dir(dir: &Path) -> Result<Self, Absent> {
         if !dir.is_dir() {
             return Err(Absent::NoDirectory(dir.to_path_buf()));
@@ -925,11 +877,8 @@ impl WorkGraph {
         }
     }
 
-    /// The graph in a directory, empty when there is none.
-    ///
-    /// A writer's view: a seat with nothing claimed and a seat with no
-    /// directory are the same cold start to something about to write. Readers
-    /// want [`WorkGraph::open_dir`], which says which of the two it found.
+    /// The graph in a directory, empty when there is none: a writer's view.
+    /// Readers want [`WorkGraph::open_dir`].
     pub fn load_dir(dir: &Path) -> Self {
         match crate::snap::read_bin(dir) {
             Ok((next_seq, mint_seq, nodes)) => {
