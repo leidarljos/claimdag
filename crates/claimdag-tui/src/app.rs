@@ -1,9 +1,5 @@
-//! Pane state and key handling. Drawing lives in [`crate::view`].
-//!
-//! Mutations go through [`claimdag::WorkGraph`], the same calls the command
-//! line makes. This pane does not reimplement claim, complete or unlink, and
-//! it does not relax their guards: an action a stranger may not take fails
-//! here with the message the graph gives it.
+//! Pane state and key handling; drawing lives in [`crate::view`]. Mutations
+//! go through [`claimdag::WorkGraph`] with the graph's own guards.
 
 use std::path::{Path, PathBuf};
 
@@ -44,11 +40,8 @@ pub struct App {
     pub message: String,
     /// What the files looked like at the last reload.
     stamp: u128,
-    /// How long a claim may go quiet before the pane will hand it back.
-    ///
-    /// A pane's lease is not the graph's: the graph has none, it takes one per
-    /// call. This is the number the operator is acting on when they press the
-    /// key, so it lives beside the key rather than in the library.
+    /// How long a claim may go quiet before the pane hands it back; the graph
+    /// takes the lease per call.
     pub lease: u64,
 }
 
@@ -199,15 +192,7 @@ impl App {
         self.mutate("claimed", |graph| graph.claim(id, actor, None).map(|_| ()));
     }
 
-    /// Hand back every claim quiet longer than the lease.
-    ///
-    /// The pane already shows how long a held node has been quiet, and an
-    /// operator watching a stalled claim had to leave the pane to act on what
-    /// the pane was telling them.
-    ///
-    /// Every stale claim rather than the selected one, because the lease is
-    /// the rule and applying it to one node is a judgement the lease already
-    /// made. What is selected has nothing to do with which claims went quiet.
+    /// Hand back every claim quiet longer than the lease, not only the selected one.
     fn reclaim(&mut self) {
         // Not through `mutate`, because the count has to come back out and a
         // closure that owns it cannot hand it over.
