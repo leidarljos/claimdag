@@ -35,27 +35,10 @@ $ claimdag --dir /var/lib/seat link <parent> <child>
 
 ## Which ready node
 
-A scheduler handing out one node at a time has to answer which, and the answer
-since Hu (DOI 10.1287/opre.9.6.841) is the head of the longest chain of
-remaining work: its critical path. Two nodes are ready, one is the head of a
-chain of nine still to be done and the other is a leaf nothing waits on;
-handing out the leaf delays all nine by however long the leaf takes, and
-nothing reports that it happened.
-
-`ready` orders by that depth, then by recency, then by id. Recency is a
-tie-break, not the sort: the most recently touched ready node is usually the
-one somebody just created or just unblocked, which says nothing about what
-waits on it. The cost model is unit, because the graph carries no durations,
-and that is the case Hu's result covers. Graham (DOI 10.1137/0117039) is what
-bounds any list schedule against the optimum; HEFT (DOI 10.1109/71.993206) is
-the same priority for heterogeneous machines.
-
-Every row carries `waiting_below`, so a caller can see why the order is the
-order rather than being told to trust it.
-
-```toml
-claimdag = { git = "https://github.com/HaoZeke/claimdag", tag = "v0.1.3" }
-```
+`ready` orders by the longest chain of unfinished work below a node, unit
+cost, then recency, then id: the list-scheduling priority (Hu, DOI
+10.1287/opre.9.6.841; Graham, DOI 10.1137/0117039; HEFT, DOI 10.1109/71.993206).
+Every row carries `waiting_below`, so the order is visible rather than trusted.
 
 ## What this is not
 
