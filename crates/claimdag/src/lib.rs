@@ -17,3 +17,6 @@ pub use graph::{
 pub use id::{mint_work_id, WorkId};
 pub use seat::resolve_dir;
 pub use snap::SNAP_BIN;
+
+pub mod lock;
+pub use lock::lock_dir;

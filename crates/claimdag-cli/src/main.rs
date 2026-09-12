@@ -223,6 +223,14 @@ fn run() -> Result<(), String> {
     // A verb that only reads says when there is no graph to read. An empty
     // list and a seat pointed at nothing look the same to a caller, and they
     // mean opposite things: one is an answer, the other is a wrong question.
+    // A writer holds the directory from load to save, so two processes
+    // cannot both read the same snapshot and each write back without the
+    // other's change.
+    let _lock = if reads_only(&cli.cmd) {
+        None
+    } else {
+        Some(claimdag::lock_dir(&dir)?)
+    };
     let mut g = if reads_only(&cli.cmd) {
         WorkGraph::open_dir(&dir).map_err(|absent| absent.to_string())?
     } else {
