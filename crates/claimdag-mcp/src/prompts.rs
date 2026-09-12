@@ -1,15 +1,4 @@
-//! Working a lease, as a sequence rather than four unrelated verbs.
-//!
-//! A prompt carries what a tool description cannot: an order, and the reason
-//! for it. The order here is set by the one thing this store is about. A claim
-//! is not a fact, it is a statement that expires, so every step after the
-//! claim carries the token the claim handed back, and an agent that drops it
-//! between calls is one that will finish work it no longer holds.
-//!
-//! What is scheduled here does not outlive the session. Nothing in these
-//! prompts tells an agent what the work means or what it produced; those are
-//! the tracker's and the deed store's, and they are deliberately outside this
-//! join.
+//! Prompts: work a node under a lease, carrying the generation from claim to finish.
 
 use rmcp::{
     handler::server::wrapper::Parameters, model::*, prompt, prompt_router, ErrorData as McpError,
@@ -110,12 +99,28 @@ impl ClaimdagServer {
 mod tests {
     use super::*;
 
+    fn text(message: &PromptMessage) -> &str {
+        &message.content.as_text().expect("a text prompt").text
+    }
+
+    fn ordered(said: &str, verbs: &[&str]) {
+        let at: Vec<usize> = verbs
+            .iter()
+            .map(|v| {
+                said.find(v)
+                    .unwrap_or_else(|| panic!("{v} missing: {said}"))
+            })
+            .collect();
+        assert!(
+            at.windows(2).all(|w| w[0] < w[1]),
+            "{verbs:?} out of order: {said}"
+        );
+    }
+
     /// Every declared prompt renders, from the arguments it says it takes.
     #[tokio::test]
     async fn every_prompt_renders_from_what_it_declares() {
         let declared = ClaimdagServer::prompt_router().list_all();
-        // As a set: the router lists by name, and what matters is which
-        // prompts are declared rather than the order a listing returns them.
         let mut names: Vec<&str> = declared.iter().map(|p| p.name.as_str()).collect();
         names.sort_unstable();
         assert_eq!(names, ["sweep_stale_claims", "take_the_next_node"]);
@@ -142,11 +147,18 @@ mod tests {
             }))
             .await
             .expect("renders");
-        let said = format!("{:?}", took[0].content);
+        let said = text(&took[0]);
         assert!(said.contains("actor reader"), "{said}");
         assert!(said.contains("60 second lease"), "{said}");
-        // The property the whole surface is shaped by survives into the text.
-        assert!(said.contains("generation"), "{said}");
+        ordered(
+            &said,
+            &[
+                "`claimdag_ready`",
+                "`claimdag_claim`",
+                "`claimdag_renew`",
+                "`claimdag_complete`",
+            ],
+        );
 
         let default = server
             .take_the_next_node_prompt(Parameters(TakeArgs {
@@ -155,8 +167,8 @@ mod tests {
             }))
             .await
             .expect("renders");
-        let said = format!("{:?}", default[0].content);
-        assert!(said.contains("the seat's own identity"), "{said}");
+        let said = text(&default[0]);
+        assert!(!said.contains("Some(") && !said.contains("None"), "{said}");
         assert!(
             said.contains(&format!("{DEFAULT_LEASE} second lease")),
             "{said}"
@@ -168,8 +180,8 @@ mod tests {
             }))
             .await
             .expect("renders");
-        let said = format!("{:?}", swept[0].content);
+        let said = text(&swept[0]);
         assert!(said.contains(&format!("{DEFAULT_LEASE} seconds")), "{said}");
-        assert!(said.contains("quiet is not the same as"), "{said}");
+        ordered(said, &["`claimdag_list`", "`claimdag_reclaim`"]);
     }
 }
