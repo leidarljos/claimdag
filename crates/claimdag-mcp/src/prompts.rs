@@ -151,7 +151,7 @@ mod tests {
         assert!(said.contains("actor reader"), "{said}");
         assert!(said.contains("60 second lease"), "{said}");
         ordered(
-            &said,
+            said,
             &[
                 "`claimdag_ready`",
                 "`claimdag_claim`",
