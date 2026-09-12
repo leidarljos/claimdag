@@ -3,6 +3,9 @@
 
 * A claim is a lease
 
+#+ATTR_HTML: :alt A node's states: todo, ready, claimed, terminal; claim moves the generation, renew keeps it, reclaim moves it again :width 100%
+[[file:_static/lease.svg]]
+
 A claim with no expiry is a claim a crashed worker keeps. The node stays
 claimed with nobody on it, and because one assignee has at most one live
 node, that worker's identity can never claim again either. One process

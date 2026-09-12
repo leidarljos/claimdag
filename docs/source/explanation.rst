@@ -7,6 +7,8 @@ Explanation
 A claim is a lease
 ------------------
 
+.. image:: _static/lease.svg
+
 A claim with no expiry is a claim a crashed worker keeps. The node stays
 claimed with nobody on it, and because one assignee has at most one live
 node, that worker's identity can never claim again either. One process
@@ -48,6 +50,15 @@ machines (Hu, https://doi.org/10.1287/opre.9.6.841; Graham, https://doi.org/10.1
 the heterogeneous earliest-finish-time heuristic (HEFT) extends it to
 workers of different speeds (https://doi.org/10.1109/71.993206). Computing the depth below every node is one pass
 over the graph and costs under a millisecond at four thousand nodes.
+
+One mutator across processes
+----------------------------
+
+Every command line and every server call that changes the graph takes an
+advisory lock on the graph directory, held from load to save. Two workers
+claiming at once serialise on it, so neither writes back a snapshot that
+lacks the other's change; readers take no lock and read the last snapshot
+whole, since it is replaced by rename.
 
 Outside the join
 ----------------
