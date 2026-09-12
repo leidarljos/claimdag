@@ -59,11 +59,7 @@ pub struct NodeRow {
     /// reclaim needs it, and a status of `claimed` reads the same whether the
     /// holder is working or gone.
     pub quiet_seconds: Option<u64>,
-    /// How long a chain of unfinished work still waits below this node.
-    ///
-    /// This is why the ready list is in the order it is in. A node with three
-    /// below it outranks a leaf with none, however recently the leaf was
-    /// touched, because starting the leaf delays all three.
+    /// Unfinished work still waiting below this node; the ready order.
     pub waiting_below: u32,
 }
 
@@ -143,9 +139,6 @@ impl ClaimdagServer {
     async fn claimdag_ready(&self) -> Result<Json<Vec<NodeRow>>, McpError> {
         let graph = self.reading()?;
         let now = now_unix();
-        // The core's view, not a filter written again here. Two definitions of
-        // ready is one that will drift from what `claim` accepts, and the
-        // order is a scheduling decision rather than a presentation one.
         let depth = graph.critical_depth();
         Ok(Json(
             graph
