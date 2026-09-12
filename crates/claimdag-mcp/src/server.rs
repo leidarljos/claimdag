@@ -1,25 +1,5 @@
-//! The claim graph as an agent surface.
-//!
-//! An agent picking up work asks one question before it does anything else:
-//! what is unblocked and unheld. That answer lived behind a shell, which meant
-//! the first thing an agent needed was the thing it could not see.
-//!
-//! The shape of this surface is set by the lease. A claim is not a fact, it is
-//! a statement that expires, so every verb here either takes the generation it
-//! was given or says why it is not taking one:
-//!
-//! - `claim` hands back a generation, which is the token for everything after.
-//! - `renew` says the holder is alive and leaves the generation alone, because
-//!   a renewal is not a change of ownership.
-//! - `complete` takes the token, so a holder that stalled long enough to be
-//!   reclaimed is refused rather than finishing work somebody else now holds.
-//!
-//! An agent that drops the generation between calls is an agent that will
-//! finish work it no longer holds, so the tools that return one say what it is
-//! for rather than leaving it as a number in a field.
-//!
-//! One process holds the graph, so this is a reader and a writer over the same
-//! snapshot the pane and the command line use, not a second store.
+//! The claim graph over MCP, on the snapshot the pane and the CLI use.
+//! `claim` returns a generation; `complete` requires it; `renew` leaves it.
 
 use std::path::PathBuf;
 
