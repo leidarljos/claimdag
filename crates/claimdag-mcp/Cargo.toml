@@ -12,7 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
-claimdag = { path = "../claimdag", version = "0.5.0" }
+claimdag = { path = "../claimdag", version = "0.6.0" }
 rmcp = { version = "3.2", features = ["server", "transport-io", "transport-async-rw", "macros"] }
 schemars = "1"
 serde = { version = "1", features = ["derive"] }

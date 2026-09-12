@@ -2,7 +2,7 @@
 
 Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 
-## Unreleased
+## 0.6.0 (2026-09-12)
 
 - `reopen ID [--actor ID]` and `claimdag_reopen`: a terminal node comes
   back to ready with the generation moved, so a tracker id that maps to
