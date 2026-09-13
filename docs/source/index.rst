@@ -1,8 +1,3 @@
-========
-claimdag
-========
-
-
 .. raw:: html
 
    <div class="vi-hero">
@@ -33,29 +28,29 @@ worker that dies gives the node back. Completing a node here does not close
 a ticket anywhere; the tracker is a different store.
 
 Install
--------
+=======
 
 .. code:: console
 
-    $ cargo binstall claimdag-cli
-    $ cargo binstall claimdag-mcp   # optional
-    $ cargo binstall claimdag-tui   # optional pane
+   $ cargo binstall claimdag-cli
+   $ cargo binstall claimdag-mcp   # optional
+   $ cargo binstall claimdag-tui   # optional pane
 
 The graph lives in ``$XDG_RUNTIME_DIR/claimdag`` unless ``CLAIMDAG_DIR`` or
 ``--dir`` says otherwise. It is session state and does not outlive the seat.
 
 First minute
-------------
+============
 
 .. code:: console
 
-    $ a=$(claimdag upsert --summary "parse the manifest header")
-    $ claimdag claim $a --assignee $(printf '%032x' 7)
-    gen=2
-    $ claimdag list
-    092dca29...  claimed  task  00000000  gen=2  parse the manifest header
-    $ claimdag complete $a --status done
-    092dca29...  done
+   $ a=$(claimdag upsert --summary "parse the manifest header")
+   $ claimdag claim $a --assignee $(printf '%032x' 7)
+   gen=2
+   $ claimdag list
+   092dca29...  claimed  task  00000000  gen=2  parse the manifest header
+   $ claimdag complete $a --status done
+   092dca29...  done
 
 .. toctree::
    :maxdepth: 1
@@ -67,3 +62,4 @@ First minute
    reference
    explanation
    architecture
+   seat
