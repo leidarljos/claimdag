@@ -9,6 +9,17 @@
 The host process is the sole mutator. Snapshot is `work.bin` (mmap).
 This crate has no RPC surface.
 
+Docs: https://leidarljos.github.io/claimdag/
+
+| Page | What it answers |
+|---|---|
+| [Getting started](https://leidarljos.github.io/claimdag/getting-started.html) | Upsert, claim, complete on a scratch graph |
+| [How-to](https://leidarljos.github.io/claimdag/howto.html) | Leases, release, ready |
+| [Reference](https://leidarljos.github.io/claimdag/reference.html) | Verbs, generation, snapshot |
+| [Explanation](https://leidarljos.github.io/claimdag/explanation.html) | Why completing does not close a ticket |
+
+The seat that claims through this graph is documented at https://leidarljos.github.io.
+
 ```console
 $ cargo add claimdag
 $ cargo install --path crates/claimdag-cli
