@@ -1,25 +1,16 @@
-=====================
-claimdag architecture
-=====================
-
-
 One writer. Unpacked Cap'n on disk. Hosts mmap ``work.bin``.
 
 Law
----
+===
 
-- The host process is the sole mutator.
-
-- The schema is claimdag's. This crate has no RPC surface.
-
-- Ids are 128-bit ``WorkId``. Kind, status, and role are closed enums.
-
-- Summary is the only open text field.
-
-- Terminal status is sticky. ``archive`` is a flag, not a status.
+-  The host process is the sole mutator.
+-  The schema is claimdag's. This crate has no RPC surface.
+-  Ids are 128-bit ``WorkId``. Kind, status, and role are closed enums.
+-  Summary is the only open text field.
+-  Terminal status is sticky. ``archive`` is a flag, not a status.
 
 Not a record
-------------
+============
 
 claimdag holds the work one host process is handing out now. The snapshot lives
 in the runtime directory, is capped at 4096 nodes, and prunes finished work to
@@ -38,32 +29,25 @@ it schedules instead, by opening ``summary`` with the tracker id. That is a
 convention and not a schema change.
 
 Split
------
+=====
 
-.. table::
-
-    +---------------------------+---------------------------------+
-    | Piece                     | Role                            |
-    +===========================+=================================+
-    | ``schema/claimdag.capnp`` | Snap / node / id                |
-    +---------------------------+---------------------------------+
-    | ``crates/claimdag``       | DAG, CAS, mmap load             |
-    +---------------------------+---------------------------------+
-    | ``crates/claimdag-cli``   | ``claimdag`` over a directory   |
-    +---------------------------+---------------------------------+
-    | ``claimdag_tui``          | Textual tree; mutations via CLI |
-    +---------------------------+---------------------------------+
+========================= ===============================
+Piece                     Role
+========================= ===============================
+``schema/claimdag.capnp`` Snap / node / id
+``crates/claimdag``       DAG, CAS, mmap load
+``crates/claimdag-cli``   ``claimdag`` over a directory
+``claimdag_tui``          Textual tree; mutations via CLI
+========================= ===============================
 
 Disk
-----
+====
 
-- Write: atomic replace of ``$dir/work.bin`` (unpacked Cap'n).
-
-- Read: mmap ``work.bin``.
-
-- Default ``list`` / TUI: live nodes only (not terminal, not archived).
+-  Write: atomic replace of ``$dir/work.bin`` (unpacked Cap'n).
+-  Read: mmap ``work.bin``.
+-  Default ``list`` / TUI: live nodes only (not terminal, not archived).
 
 Not this crate
---------------
+==============
 
 This crate is the team DAG only. Memory and ledger stores stay out.

@@ -66,4 +66,5 @@ $ claimdag complete $a --status done
    reference
    explanation
    architecture
+   seat
 #+end_export
