@@ -9,6 +9,11 @@ homepage.workspace = true
 description = "claimdag command line over a work.bin directory"
 readme.workspace = true
 
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/claimdag-v{ version }-{ target }.tar.gz"
+bin-dir = "claimdag-v{ version }-{ target }/{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
+
 [[bin]]
 name = "claimdag"
 path = "src/main.rs"
