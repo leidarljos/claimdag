@@ -37,9 +37,9 @@ Install
 
 .. code:: console
 
-    $ cargo install --git https://github.com/leidarljos/claimdag claimdag-cli
-    $ cargo install --git https://github.com/leidarljos/claimdag claimdag-mcp   # optional
-    $ cargo install --git https://github.com/leidarljos/claimdag claimdag-tui   # optional pane
+    $ cargo binstall claimdag-cli
+    $ cargo binstall claimdag-mcp   # optional
+    $ cargo binstall claimdag-tui   # optional pane
 
 The graph lives in ``$XDG_RUNTIME_DIR/claimdag`` unless ``CLAIMDAG_DIR`` or
 ``--dir`` says otherwise. It is session state and does not outlive the seat.
