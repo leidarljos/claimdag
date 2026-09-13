@@ -25,5 +25,5 @@ jobs:
         run: |
           set -euo pipefail
           for p in claimdag claimdag-cli claimdag-mcp claimdag-tui; do
-            cargo publish --locked --no-verify -p "$p" || true
+            cargo publish --locked --no-verify -p "$p"
           done
