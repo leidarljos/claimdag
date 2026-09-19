@@ -55,6 +55,42 @@ claiming at once serialise on it, so neither writes back a snapshot that
 lacks the other's change; readers take no lock and read the last snapshot
 whole, since it is replaced by rename.
 
+* A scheduler, not a record
+
+claimdag holds the work one host process is handing out right now: who is
+on what, what is unblocked, what finished. The snapshot lives in the
+runtime directory, is capped at 4096 nodes, and prunes finished work to
+stay under the cap. Nothing here is meant to outlive the session that
+wrote it.
+
+A plain-text issue tracker models the same shape: parent edge, hard
+dependency, holder, derived workable set, sticky terminal state. The two
+are not redundant. A record is edited by people, carries prose, and is
+kept in version control forever. A scheduler is compare-and-swap over an
+mmap. Forcing either to be the other makes the record slow or the
+scheduler unreadable. The rule for picking is the tempo, not the shape:
+an answer that has to survive the session belongs in the tracker.
+
+* Citations are deliberately absent
+
+A =WorkNode= has no field that could hold a deed accession, and it is not
+getting one. The accession crosses a tracker, a memory pack and a deed
+store, all three durable. A scheduler that prunes its own finished nodes
+cannot be an end of a citation without lying about it later.
+
+What a node can do is name what it is scheduling. =summary= is the only
+open text field, so a node that stands for a tracked issue opens its
+summary with that issue's id:
+
+#+begin_src console
+$ claimdag upsert --summary "vissue-4asb land the adapter"
+$ claimdag list --json | grep vissue-4asb
+#+end_src
+
+That is a convention rather than a schema change, and it is the whole
+route. The tracker holds the citation. The node points at the tracker.
+Neither reads the other's store.
+
 * Outside the join
 
 The tracker knows what the work is and who agrees. The deed store knows
