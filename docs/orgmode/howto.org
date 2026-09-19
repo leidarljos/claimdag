@@ -63,6 +63,16 @@ claims and completes through the same graph calls the command line makes,
 and hands back every stale claim with one key. It relaxes none of the
 guards.
 
+The graph is a DAG over dependencies and a forest over parents; the pane
+draws the forest. Bindings: =c= claim, =d= complete, =a= archive, =u=
+unlink, =h= show finished, =A= show archived, =r= reload, =q= quit.
+Colours come from the terminal. =--dump= prints the forest and exits.
+
+=CLAIMDAG_ACTOR= pins who the pane claims as; without it the id is derived
+from user and host, so the same seat is the same actor across restarts.
+=handles.json= in the graph directory, or =CLAIMDAG_HANDLES=, maps actor
+ids to names a person recognises.
+
 * Serve to an agent
 
 #+begin_src console
