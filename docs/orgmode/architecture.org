@@ -36,7 +36,7 @@ convention and not a schema change.
 | =schema/claimdag.capnp= | Snap / node / id |
 | =crates/claimdag= | DAG, CAS, mmap load |
 | =crates/claimdag-cli= | =claimdag= over a directory |
-| =claimdag_tui= | Textual tree; mutations via CLI |
+| =claimdag_tui= | ratatui forest over the parents; mutations through the same =WorkGraph= calls the CLI makes |
 
 * Disk
 
