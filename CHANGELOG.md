@@ -2,6 +2,11 @@
 
 Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 
+## 0.6.2 (2026-09-20)
+
+- The how-to names the tools the server serves; `claimdag_complete` is
+  titled as what it does; the architecture page names the ratatui pane.
+
 ## 0.6.0 (2026-09-12)
 
 - `reopen ID [--actor ID]` and `claimdag_reopen`: a terminal node comes
