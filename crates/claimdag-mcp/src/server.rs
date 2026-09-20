@@ -261,7 +261,7 @@ impl ClaimdagServer {
     #[tool(
         description = "Finish a node. Pass the generation claim gave you: without it the finish goes through even if your lease was reclaimed and somebody else has the work. Terminal is sticky.",
         annotations(
-            title = "Finish work",
+            title = "Complete the node",
             read_only_hint = false,
             destructive_hint = true,
             idempotent_hint = true,
