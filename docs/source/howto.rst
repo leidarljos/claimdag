@@ -74,6 +74,6 @@ Serve to an agent
 
    $ claimdag-mcp
 
-Tools: ``claimdag_ready``, ``claimdag_list``, ``claimdag_get``, ``claimdag_claim``,
+Tools: ``claimdag_ready``, ``claimdag_list``, ``claimdag_claim``,
 ``claimdag_renew``, ``claimdag_release``, ``claimdag_reopen``, ``claimdag_complete``, ``claimdag_reclaim``. Two prompts
 sequence taking the next node under a lease and sweeping stale claims.
