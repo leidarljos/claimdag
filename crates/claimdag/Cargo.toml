@@ -9,6 +9,11 @@ homepage.workspace = true
 description.workspace = true
 readme.workspace = true
 
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/claimdag-v{ version }-{ target }.tar.gz"
+bin-dir = "claimdag-v{ version }-{ target }/claimdag{ binary-ext }"
+pkg-fmt = "tgz"
+
 [dependencies]
 xxhash-rust.workspace = true
 capnp.workspace = true
