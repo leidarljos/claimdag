@@ -23,6 +23,21 @@ The seat that claims through this graph is documented at https://leidarljos.gith
 ```console
 $ cargo add claimdag
 $ cargo install --path crates/claimdag-cli
+```
+
+## First minute
+
+```console
+$ export CLAIMDAG_DIR=/tmp/demo-claims
+$ a=$(claimdag upsert --summary "parse the manifest header")
+$ b=$(claimdag upsert --summary "reject a manifest with no header" --parent $a)
+$ claimdag link $a $b
+$ claimdag list
+092dca29...  ready  task  gen=1  parse the manifest header
+71368334...  todo   task  gen=1  reject a manifest with no header
+```
+
+```console
 $ claimdag --dir /var/lib/seat upsert --summary "land the adapter"
 $ claimdag --dir /var/lib/seat list
 $ claimdag --dir /var/lib/seat list --json --all
