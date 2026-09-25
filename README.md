@@ -4,7 +4,7 @@
 
 # claimdag
 
-**CAS claim and complete on a DAG. One writer. Unpacked Cap'n on disk.**
+**What is claimable right now?** CAS claim and complete on a DAG. One writer. Unpacked Cap'n on disk.
 
 The host process is the sole mutator. Snapshot is `work.bin` (mmap).
 This crate has no RPC surface.

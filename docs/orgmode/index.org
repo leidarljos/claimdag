@@ -55,6 +55,8 @@ $ claimdag complete $a --status done
 092dca29...  done
 #+end_src
 
+The [[file:getting-started.org][tutorial]] is this first minute, then a second node that waits on the first.
+
 #+begin_export rst
 .. toctree::
    :maxdepth: 1

@@ -52,6 +52,8 @@ First minute
    $ claimdag complete $a --status done
    092dca29...  done
 
+The :doc:`tutorial <getting-started>` is this first minute, then a second node that waits on the first.
+
 .. toctree::
    :maxdepth: 1
    :caption: Guides
