@@ -5,6 +5,16 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 description = "Model Context Protocol server over a claim graph: what is claimable, who holds what, and the lease on it"
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+
+# The release archive is named after the workspace, not this crate, so point
+# cargo-binstall at it; claimdag-mcp ships beside claimdag in that tarball.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/claimdag-v{ version }-{ target }.tar.gz"
+bin-dir = "claimdag-v{ version }-{ target }/{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
 
 [[bin]]
 name = "claimdag-mcp"
