@@ -93,7 +93,12 @@ fn balanced_ready(c: &mut Criterion) {
         group.bench_with_input(
             BenchmarkId::new(format!("chains of {depth}"), n),
             &n,
-            |b, _| b.iter(|| g.ready_view_balanced(WorkRole::Implementor, worker, 1).len()),
+            |b, _| {
+                b.iter(|| {
+                    g.ready_view_balanced(WorkRole::Implementor, worker, 1)
+                        .len()
+                })
+            },
         );
     }
     group.finish();
