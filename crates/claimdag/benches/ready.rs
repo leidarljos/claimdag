@@ -83,5 +83,21 @@ fn depth(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, ready, depth);
+fn balanced_ready(c: &mut Criterion) {
+    let mut group = c.benchmark_group("balanced ready over n nodes");
+    group.measurement_time(Duration::from_secs(6));
+    let worker = id(12345);
+    for (n, depth) in [(256usize, 8usize), (1_024, 8), (4_096, 8), (4_096, 64)] {
+        let g = graph(n, depth);
+        group.throughput(Throughput::Elements(n as u64));
+        group.bench_with_input(
+            BenchmarkId::new(format!("chains of {depth}"), n),
+            &n,
+            |b, _| b.iter(|| g.ready_view_balanced(WorkRole::Implementor, worker, 1).len()),
+        );
+    }
+    group.finish();
+}
+
+criterion_group!(benches, ready, depth, balanced_ready);
 criterion_main!(benches);

@@ -335,3 +335,35 @@ fn renewing_holds_the_lease_without_moving_the_generation() {
         .complete(node, WorkStatus::Done, "", holder, Some(held_gen))
         .expect("the renewed holder finishes");
 }
+
+/// `claim_next` guarantees the single-live-claim invariant per assignee across
+/// automated balanced dispatches.
+#[test]
+fn claim_next_respects_single_holder_occupancy_invariant() {
+    let mut graph = WorkGraph::default();
+    let n1 = ready(&mut graph, "task 1");
+    let n2 = ready(&mut graph, "task 2");
+    let worker = actor(42);
+
+    let (claimed1, gen1) = graph
+        .claim_next(worker, WorkRole::Implementor, 1)
+        .expect("claim 1");
+    assert_eq!(gen1, 2);
+    assert!(claimed1 == n1 || claimed1 == n2);
+
+    let err = graph
+        .claim_next(worker, WorkRole::Implementor, 1)
+        .expect_err("second claim must be refused");
+    assert!(err.contains("assignee busy"), "{err}");
+
+    // Completing frees the worker to claim again
+    graph
+        .complete(claimed1, WorkStatus::Done, "done", worker, Some(gen1))
+        .expect("complete");
+
+    let (claimed2, gen2) = graph
+        .claim_next(worker, WorkRole::Implementor, 1)
+        .expect("claim 2 after complete");
+    assert_ne!(claimed1, claimed2);
+    assert_eq!(gen2, 2);
+}
