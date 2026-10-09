@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use claimdag::{Absent, WorkGraph, WorkId, WorkNode, WorkStatus};
+use claimdag::{Absent, WorkGraph, WorkId, WorkNode, WorkRole, WorkStatus};
 use rmcp::{
     handler::server::wrapper::Json, handler::server::wrapper::Parameters,
     handler::server::ServerHandler, model::*, prompt_handler, tool, tool_handler, tool_router,
@@ -130,6 +130,45 @@ impl ClaimdagServer {
     }
 
     #[tool(
+        description = "Work that can be taken right now, ordered by role suitability and worker dispersion with critical slack to prevent herd contention. Take the first one.",
+        annotations(
+            title = "Balanced claimable work",
+            read_only_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn claimdag_ready_balanced(
+        &self,
+        Parameters(args): Parameters<ReadyArgs>,
+    ) -> Result<Json<Vec<NodeRow>>, McpError> {
+        let graph = self.reading()?;
+        let now = now_unix();
+        let depth = graph.critical_depth();
+        let role = args
+            .role
+            .as_deref()
+            .and_then(WorkRole::parse_str)
+            .unwrap_or(WorkRole::Unset);
+        let assignee = args
+            .assignee
+            .as_deref()
+            .and_then(WorkId::from_hex)
+            .unwrap_or(WorkId::ZERO);
+        let slack = args.slack.unwrap_or(1);
+        let nodes = if args.balanced.unwrap_or(true) {
+            graph.ready_view_balanced(role, assignee, slack)
+        } else {
+            graph.ready_view()
+        };
+        Ok(Json(
+            nodes
+                .into_iter()
+                .map(|n| row(n, now, depth.get(&n.id).copied().unwrap_or(0)))
+                .collect(),
+        ))
+    }
+
+    #[tool(
         description = "Every live node: what is held, by whom, and how long each held one has gone without word. The quiet seconds are what a reclaim decision is made from.",
         annotations(
             title = "The live graph",
@@ -173,6 +212,37 @@ impl ClaimdagServer {
         let _lock = claimdag::lock_dir(&self.dir).map_err(bad)?;
         let mut graph = WorkGraph::load_dir(&self.dir);
         let generation = graph.claim(id, assignee, args.generation).map_err(bad)?;
+        graph.save_dir(&self.dir).map_err(bad)?;
+        Ok(Json(ClaimRow {
+            id: id.to_hex(),
+            generation,
+        }))
+    }
+
+    #[tool(
+        description = "Atomically claim the best available ready node using role-aware and power-of-two load balancing. Avoids CAS stampedes when multiple workers seek work simultaneously. Returns the claimed node and generation token to carry.",
+        annotations(
+            title = "Claim next work",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn claimdag_claim_next(
+        &self,
+        Parameters(args): Parameters<ClaimNextArgs>,
+    ) -> Result<Json<ClaimRow>, McpError> {
+        let assignee = parse(&args.assignee)?;
+        let role = args
+            .role
+            .as_deref()
+            .and_then(WorkRole::parse_str)
+            .unwrap_or(WorkRole::Unset);
+        let slack = args.slack.unwrap_or(1);
+        let _lock = claimdag::lock_dir(&self.dir).map_err(bad)?;
+        let mut graph = WorkGraph::load_dir(&self.dir);
+        let (id, generation) = graph.claim_next(assignee, role, slack).map_err(bad)?;
         graph.save_dir(&self.dir).map_err(bad)?;
         Ok(Json(ClaimRow {
             id: id.to_hex(),
@@ -412,6 +482,7 @@ mod tests {
             writers,
             vec![
                 "claimdag_claim".to_string(),
+                "claimdag_claim_next".to_string(),
                 "claimdag_complete".to_string(),
                 "claimdag_reclaim".to_string(),
                 "claimdag_release".to_string(),
@@ -514,5 +585,51 @@ mod tests {
             format!("{err:?}").contains("nothing has been claimed"),
             "{err:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn claimdag_claim_next_and_ready_balanced_work() {
+        let (dir, server) = seat();
+        let node1 = work(dir.path(), "explore work");
+        {
+            let mut g = WorkGraph::load_dir(dir.path());
+            g.upsert(
+                node1,
+                WorkFields {
+                    kind: WorkKind::Task,
+                    status: WorkStatus::Ready,
+                    role: WorkRole::Explore,
+                    parent: WorkId::ZERO,
+                    actor: WorkId { hi: 1, lo: 1 },
+                    summary: "explore work",
+                },
+            )
+            .unwrap();
+            g.save_dir(dir.path()).unwrap();
+        }
+        let node2 = work(dir.path(), "implementor work");
+
+        let me_imp = WorkId { hi: 42, lo: 42 }.to_hex();
+        let ready = server
+            .claimdag_ready_balanced(Parameters(ReadyArgs {
+                role: Some("implementor".into()),
+                assignee: Some(me_imp.clone()),
+                balanced: Some(true),
+                slack: Some(1),
+            }))
+            .await
+            .expect("ready balanced");
+        assert_eq!(ready.0[0].id, node2.to_hex());
+
+        let claimed = server
+            .claimdag_claim_next(Parameters(ClaimNextArgs {
+                assignee: me_imp,
+                role: Some("implementor".into()),
+                slack: Some(1),
+            }))
+            .await
+            .expect("claim next");
+        assert_eq!(claimed.0.id, node2.to_hex());
+        assert_eq!(claimed.0.generation, 2);
     }
 }

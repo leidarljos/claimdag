@@ -60,6 +60,36 @@ enum Cmd {
         #[arg(long)]
         gen: Option<u64>,
     },
+    /// View ready nodes that can be taken now: unblocked and unfinished.
+    Ready {
+        /// Filter or prioritize by role ('explore', 'architect', 'implementor', 'verifier', 'orchestrator', 'general').
+        #[arg(long, default_value = "unset")]
+        role: String,
+        /// Requesting worker id (32 hex) for dispersed load balancing.
+        #[arg(long, default_value = "00000000000000000000000000000000")]
+        assignee: String,
+        /// Critical depth slack for candidate dispersion.
+        #[arg(long, default_value_t = 1)]
+        slack: usize,
+        /// Order by balanced suitability and worker dispersion rather than static depth.
+        #[arg(long)]
+        balanced: bool,
+        /// Machine JSON (default is text lines).
+        #[arg(long)]
+        json: bool,
+    },
+    /// Atomically claim the best available ready node with load-balanced selection.
+    ClaimNext {
+        /// Who is taking it, 32 hex characters.
+        #[arg(long)]
+        assignee: String,
+        /// Desired role affinity ('explore', 'architect', 'implementor', 'verifier', 'orchestrator', 'general').
+        #[arg(long, default_value = "unset")]
+        role: String,
+        /// Allowed critical depth slack for candidate dispersion (default 1).
+        #[arg(long, default_value_t = 1)]
+        slack: usize,
+    },
     /// Mark a node terminal (done, failed, or cancelled).
     ///
     /// Pass the --gen returned by claim to be refused if the lease was
@@ -223,7 +253,7 @@ fn print_get(n: &WorkNode) {
 /// nothing to create, so an absent graph is something it has to say rather
 /// than something it can answer around.
 fn reads_only(cmd: &Cmd) -> bool {
-    matches!(cmd, Cmd::List { .. } | Cmd::Get { .. })
+    matches!(cmd, Cmd::List { .. } | Cmd::Get { .. } | Cmd::Ready { .. })
 }
 
 fn main() {
@@ -319,6 +349,39 @@ fn run() -> Result<(), String> {
             let cas = g.claim(parse_id(&id)?, parse_id(&assignee)?, expected)?;
             g.save_dir(&dir)?;
             println!("gen={cas}");
+        }
+        Cmd::Ready {
+            role,
+            assignee,
+            slack,
+            balanced,
+            json,
+        } => {
+            let role = WorkRole::parse_str(&role).ok_or_else(|| format!("bad role {role}"))?;
+            let assignee = parse_id(&assignee)?;
+            let nodes = if balanced || role != WorkRole::Unset || !assignee.is_zero() {
+                g.ready_view_balanced(role, assignee, slack)
+            } else {
+                g.ready_view()
+            };
+            if json {
+                print_list_json(&nodes)?;
+            } else {
+                for n in nodes {
+                    print_list_line(n);
+                }
+            }
+        }
+        Cmd::ClaimNext {
+            assignee,
+            role,
+            slack,
+        } => {
+            let assignee = parse_id(&assignee)?;
+            let role = WorkRole::parse_str(&role).ok_or_else(|| format!("bad role {role}"))?;
+            let (id, cas) = g.claim_next(assignee, role, slack)?;
+            g.save_dir(&dir)?;
+            println!("{}  gen={cas}", id.to_hex());
         }
         Cmd::Complete {
             id,
