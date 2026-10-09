@@ -2,6 +2,12 @@
 
 Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 
+## Unreleased
+
+- The explanation names the generation a fencing token. `claim` prints
+  the generation it moved to. `complete --gen` refuses with
+  `complete: gen mismatch` once ownership has moved.
+
 ## 0.6.2 (2026-09-20)
 
 - The how-to names the tools the server serves; `claimdag_complete` is
