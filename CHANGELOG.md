@@ -2,8 +2,10 @@
 
 Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 
-## Unreleased
+## 0.7.0 (2026-10-09)
 
+- `ready --balanced` and `claim-next` order ready work by role affinity
+  and claim the chosen node in one step.
 - The explanation names the generation a fencing token when the holder
   passes it back. Omitting `--gen` skips the check, so a reclaimed node
   can still be finished.
