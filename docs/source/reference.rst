@@ -17,6 +17,8 @@ Verb                                                                            
 ``reclaim [--lease SECS]``                                                                          hand back every claim quiet longer than the lease
 ``link PARENT CHILD`` / ``unlink PARENT CHILD``                                                     a hard dependency
 ``archive ID`` / ``unarchive ID``                                                                   hide or show a terminal node
+``ready [--role R] [--assignee ID] [--slack N] [--balanced] [--json]``                               ready nodes ordered by list scheduling or balanced P2C dispersion
+``claim-next --assignee ID [--role R] [--slack N]``                                                 atomically select and claim the best ready node with role affinity and P2C dispersion
 =================================================================================================== ======================================================================================
 
 Ids are 32 lowercase hex characters (xxHash3-128). The zero id means unset.

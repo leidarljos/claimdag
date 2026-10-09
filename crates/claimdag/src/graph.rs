@@ -7,6 +7,8 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 
+use xxhash_rust::xxh3::xxh3_64_with_seed;
+
 use crate::id::{mint_work_id, WorkId};
 
 /// How long a claim stands before anybody may take it back, in seconds. One
@@ -103,6 +105,27 @@ impl WorkRole {
             "general" => Some(Self::General),
             _ => None,
         }
+    }
+}
+
+/// Affinity tier of a work node to a worker's role:
+/// - 0: Exact match (node.role == worker_role), or both are Unset/General
+/// - 1: Flexible match (node.role is Unset/General, or worker_role is Unset/General)
+/// - 2: Mismatched specialization (e.g. Explorer assigned to Verifier when alternatives exist)
+#[must_use]
+pub fn role_affinity_tier(node_role: WorkRole, worker_role: WorkRole) -> u8 {
+    if worker_role == WorkRole::Unset || worker_role == WorkRole::General {
+        if node_role == WorkRole::Unset || node_role == WorkRole::General {
+            0
+        } else {
+            1
+        }
+    } else if node_role == worker_role {
+        0
+    } else if node_role == WorkRole::Unset || node_role == WorkRole::General {
+        1
+    } else {
+        2
     }
 }
 
@@ -562,6 +585,172 @@ impl WorkGraph {
         open
     }
 
+    /// Ready nodes ordered by balanced suitability for `(role, assignee)`:
+    /// 1. Critical depth slack bands: candidates within `slack` of the maximum
+    ///    critical depth form Band 0, preserving critical-path progress.
+    /// 2. Role affinity: exact match (tier 0) before general/unset (tier 1)
+    ///    before mismatched specialization (tier 2).
+    /// 3. Worker dispersion / Power-of-Two choices: pseudo-random hash ranking
+    ///    seeded by worker identity so concurrent workers naturally inspect
+    ///    distinct candidates without central lock contention.
+    /// 4. Starvation prevention: older ready nodes (updated_unix) are prioritized.
+    /// 5. Deterministic tie-break by node id.
+    #[must_use]
+    pub fn ready_view_balanced(
+        &self,
+        role: WorkRole,
+        assignee: WorkId,
+        slack: usize,
+    ) -> Vec<&WorkNode> {
+        let depth = self.critical_depth();
+        let mut open: Vec<&WorkNode> = self
+            .nodes
+            .values()
+            .filter(|n| !n.archived)
+            .filter(|n| matches!(n.status, WorkStatus::Ready | WorkStatus::Todo))
+            .filter(|n| self.deps_satisfied(n))
+            .collect();
+
+        if open.is_empty() {
+            return open;
+        }
+
+        let max_depth = open
+            .iter()
+            .map(|n| depth.get(&n.id).copied().unwrap_or(0))
+            .max()
+            .unwrap_or(0);
+
+        let slack_u32 = slack as u32;
+        let seed = if assignee.is_zero() {
+            0x9e3779b97f4a7c15
+        } else {
+            assignee.hi ^ assignee.lo.rotate_left(17)
+        };
+
+        open.sort_by(|a, b| {
+            let da = depth.get(&a.id).copied().unwrap_or(0);
+            let db = depth.get(&b.id).copied().unwrap_or(0);
+
+            let band_a = if da + slack_u32 >= max_depth {
+                0
+            } else {
+                max_depth.saturating_sub(da + slack_u32)
+            };
+            let band_b = if db + slack_u32 >= max_depth {
+                0
+            } else {
+                max_depth.saturating_sub(db + slack_u32)
+            };
+
+            let tier_a = role_affinity_tier(a.role, role);
+            let tier_b = role_affinity_tier(b.role, role);
+
+            let disp_a = xxh3_64_with_seed(&a.id.to_be_bytes(), seed);
+            let disp_b = xxh3_64_with_seed(&b.id.to_be_bytes(), seed);
+
+            band_a
+                .cmp(&band_b)
+                .then_with(|| tier_a.cmp(&tier_b))
+                .then_with(|| db.cmp(&da))
+                .then_with(|| disp_a.cmp(&disp_b))
+                .then_with(|| a.updated_unix.cmp(&b.updated_unix))
+                .then_with(|| a.id.cmp(&b.id))
+        });
+
+        open
+    }
+
+    /// Pick the single best candidate ready node for `(role, assignee)` using
+    /// Mitzenmacher's Power of Two Random Choices over the top critical-slack
+    /// candidate pool.
+    #[must_use]
+    pub fn select_balanced_ready(
+        &self,
+        role: WorkRole,
+        assignee: WorkId,
+        slack: usize,
+    ) -> Option<&WorkNode> {
+        let depth = self.critical_depth();
+        let open: Vec<&WorkNode> = self
+            .nodes
+            .values()
+            .filter(|n| !n.archived)
+            .filter(|n| matches!(n.status, WorkStatus::Ready | WorkStatus::Todo))
+            .filter(|n| self.deps_satisfied(n))
+            .collect();
+
+        if open.is_empty() {
+            return None;
+        }
+
+        let max_depth = open
+            .iter()
+            .map(|n| depth.get(&n.id).copied().unwrap_or(0))
+            .max()
+            .unwrap_or(0);
+
+        let slack_u32 = slack as u32;
+
+        let band_0: Vec<&WorkNode> = open
+            .into_iter()
+            .filter(|n| {
+                let d = depth.get(&n.id).copied().unwrap_or(0);
+                d + slack_u32 >= max_depth
+            })
+            .collect();
+
+        if band_0.is_empty() {
+            return None;
+        }
+
+        let min_tier = band_0
+            .iter()
+            .map(|n| role_affinity_tier(n.role, role))
+            .min()
+            .unwrap_or(2);
+
+        let candidates: Vec<&WorkNode> = band_0
+            .into_iter()
+            .filter(|n| role_affinity_tier(n.role, role) == min_tier)
+            .collect();
+
+        if candidates.len() == 1 {
+            return Some(candidates[0]);
+        }
+
+        let n = candidates.len();
+        let (c1, c2) = if assignee.is_zero() {
+            (candidates[0], candidates[1])
+        } else {
+            let seed1 = assignee.hi ^ 0x9e3779b97f4a7c15;
+            let seed2 = assignee.lo ^ 0x517cc1b727220a95;
+            let h1 = xxh3_64_with_seed(&assignee.to_be_bytes(), seed1) as usize;
+            let h2 = xxh3_64_with_seed(&assignee.to_be_bytes(), seed2) as usize;
+            let idx1 = h1 % n;
+            let mut idx2 = h2 % n;
+            if idx2 == idx1 {
+                idx2 = (idx1 + 1) % n;
+            }
+            (candidates[idx1], candidates[idx2])
+        };
+
+        let d1 = depth.get(&c1.id).copied().unwrap_or(0);
+        let d2 = depth.get(&c2.id).copied().unwrap_or(0);
+
+        let c1_is_better = d1
+            .cmp(&d2)
+            .then_with(|| c2.updated_unix.cmp(&c1.updated_unix))
+            .then_with(|| c1.id.cmp(&c2.id))
+            .is_gt();
+
+        if c1_is_better {
+            Some(c1)
+        } else {
+            Some(c2)
+        }
+    }
+
     fn deps_satisfied(&self, node: &WorkNode) -> bool {
         node.deps.iter().all(|d| {
             self.nodes
@@ -670,6 +859,60 @@ impl WorkGraph {
         let cas_gen = node.cas_gen;
         self.push_ledger(id, assignee, "claim");
         Ok(cas_gen)
+    }
+
+    /// Atomically find and claim the best ready work node for `assignee` matching
+    /// `role` within critical path `slack`.
+    ///
+    /// Avoids CAS stampedes and two-phase check-then-act race conditions by
+    /// combining candidate selection and state transition into one atomic step
+    /// under the graph lock.
+    pub fn claim_next(
+        &mut self,
+        assignee: WorkId,
+        role: WorkRole,
+        slack: usize,
+    ) -> Result<(WorkId, u64), String> {
+        if assignee.is_zero() {
+            return Err("claim: zero assignee".into());
+        }
+
+        // Occupancy guard: one live claim per assignee
+        let mut busy: Vec<WorkId> = self
+            .nodes
+            .values()
+            .filter(|n| {
+                n.assignee == assignee
+                    && matches!(n.status, WorkStatus::Claimed | WorkStatus::Running)
+            })
+            .map(|n| n.id)
+            .collect();
+        if !busy.is_empty() {
+            busy.sort();
+            let listed = busy
+                .iter()
+                .map(|held| held.to_hex())
+                .collect::<Vec<_>>()
+                .join(" ");
+            return Err(format!("claim: assignee busy {listed}"));
+        }
+
+        let winner_id = {
+            let candidate = self
+                .select_balanced_ready(role, assignee, slack)
+                .ok_or_else(|| "claim-next: no ready work".to_string())?;
+            candidate.id
+        };
+
+        let now = Self::now();
+        let node = self.nodes.get_mut(&winner_id).unwrap();
+        node.status = WorkStatus::Claimed;
+        node.assignee = assignee;
+        node.cas_gen = node.cas_gen.saturating_add(1);
+        node.updated_unix = now;
+        let cas_gen = node.cas_gen;
+        self.push_ledger(winner_id, assignee, "claim");
+        Ok((winner_id, cas_gen))
     }
 
     /// Return every claim quiet for longer than `lease_secs` to `Ready`,
@@ -1604,5 +1847,215 @@ mod tests {
             g.claim(b, id(10), None).unwrap_err(),
             "claim: status cancelled"
         );
+    }
+
+    #[test]
+    fn test_role_affinity_tiers() {
+        assert_eq!(role_affinity_tier(WorkRole::Explore, WorkRole::Explore), 0);
+        assert_eq!(role_affinity_tier(WorkRole::Unset, WorkRole::Explore), 1);
+        assert_eq!(role_affinity_tier(WorkRole::General, WorkRole::Explore), 1);
+        assert_eq!(role_affinity_tier(WorkRole::Implementor, WorkRole::Explore), 2);
+        assert_eq!(role_affinity_tier(WorkRole::General, WorkRole::General), 0);
+        assert_eq!(role_affinity_tier(WorkRole::Unset, WorkRole::General), 0);
+        assert_eq!(role_affinity_tier(WorkRole::Explore, WorkRole::General), 1);
+    }
+
+    #[test]
+    fn ready_view_balanced_prioritizes_role_affinity() {
+        let mut g = WorkGraph::default();
+        let a = id(1); // Explore
+        let b = id(2); // Implementor
+        let c = id(3); // Verifier
+        let actor = id(99);
+
+        g.upsert(
+            a,
+            WorkFields {
+                kind: WorkKind::Task,
+                status: WorkStatus::Ready,
+                role: WorkRole::Explore,
+                parent: WorkId::ZERO,
+                actor,
+                summary: "explore task",
+            },
+        )
+        .unwrap();
+        g.upsert(
+            b,
+            WorkFields {
+                kind: WorkKind::Task,
+                status: WorkStatus::Ready,
+                role: WorkRole::Implementor,
+                parent: WorkId::ZERO,
+                actor,
+                summary: "implementor task",
+            },
+        )
+        .unwrap();
+        g.upsert(
+            c,
+            WorkFields {
+                kind: WorkKind::Task,
+                status: WorkStatus::Ready,
+                role: WorkRole::Verifier,
+                parent: WorkId::ZERO,
+                actor,
+                summary: "verifier task",
+            },
+        )
+        .unwrap();
+
+        // Implementor worker should see Implementor task first
+        let worker_imp = id(10);
+        let ready_imp = g.ready_view_balanced(WorkRole::Implementor, worker_imp, 1);
+        assert_eq!(ready_imp[0].id, b);
+
+        // Verifier worker should see Verifier task first
+        let worker_ver = id(20);
+        let ready_ver = g.ready_view_balanced(WorkRole::Verifier, worker_ver, 1);
+        assert_eq!(ready_ver[0].id, c);
+
+        // Explorer worker should see Explore task first
+        let worker_exp = id(30);
+        let ready_exp = g.ready_view_balanced(WorkRole::Explore, worker_exp, 1);
+        assert_eq!(ready_exp[0].id, a);
+    }
+
+    #[test]
+    fn ready_view_balanced_respects_critical_slack() {
+        let mut g = WorkGraph::default();
+        let a = id(1); // Critical chain head (depth 2)
+        let a_dep = id(11);
+        let a_dep2 = id(12);
+        let b = id(2); // Leaf task (depth 0), role = Implementor
+        let actor = id(99);
+
+        g.upsert(
+            a,
+            WorkFields {
+                kind: WorkKind::Task,
+                status: WorkStatus::Ready,
+                role: WorkRole::General,
+                parent: WorkId::ZERO,
+                actor,
+                summary: "critical chain head",
+            },
+        )
+        .unwrap();
+        g.upsert(
+            a_dep,
+            WorkFields {
+                kind: WorkKind::Task,
+                status: WorkStatus::Todo,
+                role: WorkRole::General,
+                parent: WorkId::ZERO,
+                actor,
+                summary: "critical chain mid",
+            },
+        )
+        .unwrap();
+        g.upsert(
+            a_dep2,
+            WorkFields {
+                kind: WorkKind::Task,
+                status: WorkStatus::Todo,
+                role: WorkRole::General,
+                parent: WorkId::ZERO,
+                actor,
+                summary: "critical chain tail",
+            },
+        )
+        .unwrap();
+        g.link_dep(a, a_dep, actor).unwrap();
+        g.link_dep(a_dep, a_dep2, actor).unwrap();
+
+        g.upsert(
+            b,
+            WorkFields {
+                kind: WorkKind::Task,
+                status: WorkStatus::Ready,
+                role: WorkRole::Implementor,
+                parent: WorkId::ZERO,
+                actor,
+                summary: "leaf implementor task",
+            },
+        )
+        .unwrap();
+
+        // With slack = 0, critical path task 'a' (depth 2) MUST outrank leaf 'b' (depth 0)
+        // even for an Implementor worker who would prefer 'b' in role affinity
+        let worker_imp = id(10);
+        let ready_strict = g.ready_view_balanced(WorkRole::Implementor, worker_imp, 0);
+        assert_eq!(ready_strict[0].id, a, "slack 0 preserves critical chain");
+
+        // With slack = 2, 'b' is within slack of 'a' (depth 2 - 2 <= 0), so role affinity wins!
+        let ready_slack = g.ready_view_balanced(WorkRole::Implementor, worker_imp, 2);
+        assert_eq!(ready_slack[0].id, b, "slack 2 allows role affinity matching");
+    }
+
+    #[test]
+    fn claim_next_atomically_claims_and_fences() {
+        let mut g = WorkGraph::default();
+        let a = id(1);
+        let b = id(2);
+        let actor = id(99);
+
+        g.upsert(
+            a,
+            WorkFields {
+                kind: WorkKind::Task,
+                status: WorkStatus::Ready,
+                role: WorkRole::Explore,
+                parent: WorkId::ZERO,
+                actor,
+                summary: "task A",
+            },
+        )
+        .unwrap();
+        g.upsert(
+            b,
+            WorkFields {
+                kind: WorkKind::Task,
+                status: WorkStatus::Ready,
+                role: WorkRole::Implementor,
+                parent: WorkId::ZERO,
+                actor,
+                summary: "task B",
+            },
+        )
+        .unwrap();
+
+        let worker1 = id(10);
+        let (claimed_id, gen) = g
+            .claim_next(worker1, WorkRole::Implementor, 1)
+            .expect("claims next work");
+        assert_eq!(claimed_id, b, "claimed matching implementor task");
+        assert_eq!(gen, 2, "generation bumped from 1 to 2");
+
+        let node = g.get(b).unwrap();
+        assert_eq!(node.status, WorkStatus::Claimed);
+        assert_eq!(node.assignee, worker1);
+        assert_eq!(node.cas_gen, 2);
+
+        // Worker1 cannot claim another node while holding B
+        let busy_err = g
+            .claim_next(worker1, WorkRole::Explore, 1)
+            .expect_err("assignee busy");
+        assert!(busy_err.contains("assignee busy"), "{busy_err}");
+
+        // Worker2 can claim remaining task A
+        let worker2 = id(20);
+        let (claimed_id2, gen2) = g
+            .claim_next(worker2, WorkRole::Explore, 1)
+            .expect("claims task A");
+        assert_eq!(claimed_id2, a);
+        assert_eq!(gen2, 2);
+
+        // No more ready tasks
+        let worker3 = id(30);
+        let no_work_err = g
+            .claim_next(worker3, WorkRole::Unset, 1)
+            .expect_err("no ready work");
+        assert_eq!(no_work_err, "claim-next: no ready work");
     }
 }
