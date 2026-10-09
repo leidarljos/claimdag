@@ -27,6 +27,17 @@ the world moved underneath it. ``renew`` leaves the generation alone, because
 a renewal is not a change of ownership and moving it would invalidate the
 token the holder is about to complete with.
 
+That generation is a fencing token in Kleppmann's sense (`Kleppmann
+<https://martin.kleppmann.com/2016/02/08/how-to-do-distributed-locking.html>`__):
+the number a stale holder presents, which the graph refuses once
+ownership has moved. ``claim`` moves the generation and prints the new
+value. Passing that value as ``complete --gen`` is refused with
+``complete: gen mismatch`` when the node has moved on, and ``claim
+--gen`` is refused with ``claim: gen mismatch`` on the same check.
+``reclaim`` and ``release`` move the generation, so the token just
+printed no longer opens the node. The graph mints it. No lock service
+hands out the ids.
+
 Readiness is derived
 ====================
 
