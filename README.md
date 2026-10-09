@@ -67,6 +67,11 @@ cost, then recency, then id: the list-scheduling priority (Hu, DOI
 10.1287/opre.9.6.841; Graham, DOI 10.1137/0117039; HEFT, DOI 10.1109/71.993206).
 Every row carries `waiting_below`, so the order is visible rather than trusted.
 
+For multi-worker concurrency, `ready --balanced` and `claim-next` apply the Power
+of Two Choices (P2C) bounded by critical slack ($\Delta$). Probes are seeded with
+the requesting worker ID to prevent herding on the top node while strictly prioritizing
+role affinity and preserving critical path progress.
+
 ## WorkGraph pane
 
 `claimdag-tui` draws the parent forest and claims, completes and archives

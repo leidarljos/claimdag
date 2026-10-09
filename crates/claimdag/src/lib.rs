@@ -11,8 +11,8 @@ mod snap;
 
 pub use graph::DEFAULT_LEASE_SECS;
 pub use graph::{
-    Absent, WorkFields, WorkGraph, WorkKind, WorkLedgerEntry, WorkNode, WorkRole, WorkStatus,
-    SNAP_FILE,
+    role_affinity_tier, Absent, WorkFields, WorkGraph, WorkKind, WorkLedgerEntry, WorkNode,
+    WorkRole, WorkStatus, SNAP_FILE,
 };
 pub use id::{mint_work_id, WorkId};
 pub use seat::resolve_dir;

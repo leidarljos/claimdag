@@ -16,6 +16,36 @@ pub struct ListArgs {
     pub all: Option<bool>,
 }
 
+/// Querying claimable ready work.
+#[derive(Deserialize, JsonSchema, Default)]
+pub struct ReadyArgs {
+    /// Filter or prioritize by worker role ('explore', 'architect', 'implementor', 'verifier', 'orchestrator', 'general').
+    #[serde(default)]
+    pub role: Option<String>,
+    /// Who is asking, for worker-dispersed load balancing (32 hex characters).
+    #[serde(default)]
+    pub assignee: Option<String>,
+    /// Order by balanced suitability and worker dispersion rather than static depth.
+    #[serde(default)]
+    pub balanced: Option<bool>,
+    /// Allowed critical depth slack for candidate dispersion (default 1).
+    #[serde(default)]
+    pub slack: Option<usize>,
+}
+
+/// Atomically taking the next best ready node with load-balanced selection.
+#[derive(Deserialize, JsonSchema)]
+pub struct ClaimNextArgs {
+    /// Who is taking it, 32 hex characters.
+    pub assignee: String,
+    /// Desired role affinity ('explore', 'architect', 'implementor', 'verifier', 'orchestrator', 'general').
+    #[serde(default)]
+    pub role: Option<String>,
+    /// Allowed critical depth slack for candidate dispersion (default 1).
+    #[serde(default)]
+    pub slack: Option<usize>,
+}
+
 /// Taking a node.
 #[derive(Deserialize, JsonSchema)]
 pub struct ClaimArgs {

@@ -361,6 +361,7 @@ mod tests {
                 },
             )
             .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
         graph.save_dir(dir.path()).unwrap();
 
         app.poll();
