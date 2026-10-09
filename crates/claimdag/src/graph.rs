@@ -1854,7 +1854,10 @@ mod tests {
         assert_eq!(role_affinity_tier(WorkRole::Explore, WorkRole::Explore), 0);
         assert_eq!(role_affinity_tier(WorkRole::Unset, WorkRole::Explore), 1);
         assert_eq!(role_affinity_tier(WorkRole::General, WorkRole::Explore), 1);
-        assert_eq!(role_affinity_tier(WorkRole::Implementor, WorkRole::Explore), 2);
+        assert_eq!(
+            role_affinity_tier(WorkRole::Implementor, WorkRole::Explore),
+            2
+        );
         assert_eq!(role_affinity_tier(WorkRole::General, WorkRole::General), 0);
         assert_eq!(role_affinity_tier(WorkRole::Unset, WorkRole::General), 0);
         assert_eq!(role_affinity_tier(WorkRole::Explore, WorkRole::General), 1);
@@ -1990,7 +1993,10 @@ mod tests {
 
         // With slack = 2, 'b' is within slack of 'a' (depth 2 - 2 <= 0), so role affinity wins!
         let ready_slack = g.ready_view_balanced(WorkRole::Implementor, worker_imp, 2);
-        assert_eq!(ready_slack[0].id, b, "slack 2 allows role affinity matching");
+        assert_eq!(
+            ready_slack[0].id, b,
+            "slack 2 allows role affinity matching"
+        );
     }
 
     #[test]
