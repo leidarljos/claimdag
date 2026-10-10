@@ -5,6 +5,8 @@
 //! paths that do not enforce a rule can be used to get around the paths that
 //! do.
 
+use std::collections::HashSet;
+
 use claimdag::{WorkFields, WorkGraph, WorkId, WorkKind, WorkRole, WorkStatus};
 
 fn actor(n: u64) -> WorkId {
@@ -366,4 +368,49 @@ fn claim_next_respects_single_holder_occupancy_invariant() {
         .expect("claim 2 after complete");
     assert_ne!(claimed1, claimed2);
     assert_eq!(gen2, 2);
+}
+
+/// Eight workers that read the ready list and then claim its head take one
+/// node between them. Eight that claim next under the directory lock take
+/// eight.
+#[test]
+fn eight_workers_claiming_next_at_once_take_eight_nodes() {
+    let dir = std::env::temp_dir().join(format!("claimdag-next-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mut graph = WorkGraph::default();
+    for n in 0..8 {
+        ready(&mut graph, &format!("task {n}"));
+    }
+    graph.save_dir(&dir).expect("save");
+
+    let heads: Vec<WorkId> = (0..8).map(|_| graph.ready_view()[0].id).collect();
+    let won = heads
+        .iter()
+        .zip(10u64..)
+        .filter(|(head, n)| graph.claim(**head, actor(*n), None).is_ok())
+        .count();
+    assert_eq!(won, 1);
+
+    let taken: Vec<WorkId> = std::thread::scope(|s| {
+        let workers: Vec<_> = (20u64..28)
+            .map(|n| {
+                let dir = &dir;
+                s.spawn(move || {
+                    let _lock = claimdag::lock_dir(dir).expect("lock");
+                    let mut graph = WorkGraph::load_dir(dir);
+                    let (node, _) = graph
+                        .claim_next(actor(n), WorkRole::Implementor, 1)
+                        .expect("claim next");
+                    graph.save_dir(dir).expect("save");
+                    node
+                })
+            })
+            .collect();
+        workers
+            .into_iter()
+            .map(|w| w.join().expect("worker"))
+            .collect()
+    });
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(taken.iter().collect::<HashSet<_>>().len(), 8, "{taken:?}");
 }
