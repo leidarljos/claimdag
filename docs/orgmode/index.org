@@ -40,8 +40,11 @@ $ cargo binstall claimdag-mcp   # optional
 $ cargo binstall claimdag-tui   # optional pane
 #+end_src
 
-The graph lives in =$XDG_RUNTIME_DIR/claimdag= (no runtime directory: =$XDG_STATE_HOME/claimdag=, else =~/.local/state/claimdag=, else =/tmp/claimdag-UID=) unless =CLAIMDAG_DIR= or
-=--dir= says otherwise. It is session state and does not outlive the seat.
+The graph lives in =$XDG_RUNTIME_DIR/claimdag= unless =CLAIMDAG_DIR= or
+=--dir= says otherwise. It is session state there, gone when the session
+ends. With no runtime directory it goes to =$XDG_STATE_HOME/claimdag=, else
+=~/.local/state/claimdag=, else =/tmp/claimdag-UID=, and the state
+directory keeps it across sessions.
 
 * First minute
 
