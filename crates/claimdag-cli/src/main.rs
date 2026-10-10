@@ -96,14 +96,21 @@ enum Cmd {
     /// reclaimed while the work was in flight. Omitting it finishes the node
     /// whatever happened to the claim, which is the only way to speak for a
     /// node nobody holds.
+    ///
+    /// --actor names who is finishing it. Without one the call is refused;
+    /// --force finishes it for nobody, whoever holds it, and appends a line
+    /// to forced.log in the graph directory.
     Complete {
         id: String,
         #[arg(long, default_value = "done")]
         status: String,
         #[arg(long, default_value = "")]
         summary: String,
-        #[arg(long, default_value = "00000000000000000000000000000000")]
-        actor: String,
+        #[arg(long)]
+        actor: Option<String>,
+        /// Finish it with no actor, whoever holds it. Logged to forced.log.
+        #[arg(long, conflicts_with = "actor")]
+        force: bool,
         #[arg(long)]
         gen: Option<u64>,
     },
@@ -118,10 +125,17 @@ enum Cmd {
     /// The way off a claim before the work is terminal. A holder that stops
     /// without this stays busy until the lease runs out, and cannot claim
     /// anything else meanwhile.
+    ///
+    /// --actor names the holder. Without one the call is refused; --force
+    /// hands the claim back whoever holds it and appends a line to
+    /// forced.log in the graph directory.
     Release {
         id: String,
-        #[arg(long, default_value = "00000000000000000000000000000000")]
-        actor: String,
+        #[arg(long)]
+        actor: Option<String>,
+        /// Hand it back with no actor, whoever holds it. Logged to forced.log.
+        #[arg(long, conflicts_with = "actor")]
+        force: bool,
     },
     /// Bring a finished node back to ready, generation moved, so the same work can be taken again.
     Reopen {
@@ -244,6 +258,44 @@ fn print_get(n: &WorkNode) {
         n.summary
     );
     println!("deps  {deps}");
+}
+
+/// The file in the graph directory that keeps every forced release and
+/// complete, one line each.
+const FORCED_LOG: &str = "forced.log";
+
+/// Record a `--force` call: a line on stderr, and the same line appended to
+/// `forced.log` beside `work.bin`. The caller holds the directory lock.
+fn log_forced(
+    dir: &std::path::Path,
+    verb: &str,
+    id: WorkId,
+    holder: WorkId,
+    outcome: &str,
+) -> Result<(), String> {
+    use std::io::Write;
+    let line = format!(
+        "{}  {verb} --force  {}  holder={}  {outcome}",
+        WorkGraph::now(),
+        id.to_hex(),
+        holder.to_hex()
+    );
+    eprintln!("claimdag: forced: {line}");
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join(FORCED_LOG))
+        .map_err(|e| format!("{FORCED_LOG}: {e}"))?;
+    writeln!(f, "{line}").map_err(|e| format!("{FORCED_LOG}: {e}"))?;
+    f.sync_all().map_err(|e| format!("{FORCED_LOG}: {e}"))
+}
+
+/// The refusal for a release or complete with neither `--actor` nor `--force`.
+fn no_actor(verb: &str) -> String {
+    format!(
+        "{verb}: --actor is required: pass the holder's id. --force acts for nobody, \
+         whoever holds the node, and is logged to {FORCED_LOG} in the graph directory"
+    )
 }
 
 /// Whether a verb only reads the graph.
@@ -388,13 +440,24 @@ fn run() -> Result<(), String> {
             status,
             summary,
             actor,
+            force,
             gen,
         } => {
             let status =
                 WorkStatus::parse_str(&status).ok_or_else(|| format!("bad status {status}"))?;
             let id = parse_id(&id)?;
-            g.complete(id, status, &summary, parse_id(&actor)?, gen)?;
-            g.save_dir(&dir)?;
+            match actor {
+                Some(actor) if !force => {
+                    g.complete(id, status, &summary, parse_id(&actor)?, gen)?;
+                    g.save_dir(&dir)?;
+                }
+                None if !force => return Err(no_actor("complete")),
+                _ => {
+                    let holder = g.complete_forced(id, status, &summary, gen)?;
+                    g.save_dir(&dir)?;
+                    log_forced(&dir, "complete", id, holder, status.as_str())?;
+                }
+            }
             println!("{}  {}", id.to_hex(), status.as_str());
         }
         Cmd::Renew { id, actor } => {
@@ -403,10 +466,22 @@ fn run() -> Result<(), String> {
             g.save_dir(&dir)?;
             println!("gen={cas}");
         }
-        Cmd::Release { id, actor } => {
+        Cmd::Release { id, actor, force } => {
             let id = parse_id(&id)?;
-            let cas = g.release(id, parse_id(&actor)?)?;
-            g.save_dir(&dir)?;
+            let cas = match actor {
+                Some(actor) if !force => {
+                    let cas = g.release(id, parse_id(&actor)?)?;
+                    g.save_dir(&dir)?;
+                    cas
+                }
+                None if !force => return Err(no_actor("release")),
+                _ => {
+                    let (cas, holder) = g.release_forced(id)?;
+                    g.save_dir(&dir)?;
+                    log_forced(&dir, "release", id, holder, &format!("gen={cas}"))?;
+                    cas
+                }
+            };
             println!("gen={cas}");
         }
         Cmd::Reopen { id, actor } => {
