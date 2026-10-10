@@ -414,3 +414,34 @@ fn eight_workers_claiming_next_at_once_take_eight_nodes() {
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(taken.iter().collect::<HashSet<_>>().len(), 8, "{taken:?}");
 }
+
+/// A snapshot that does not parse stops a writer. The writer's old view of
+/// it was an empty graph, so the next save kept only the node being written
+/// and every other claim was gone.
+#[test]
+fn a_writer_refuses_a_snapshot_it_cannot_read() {
+    let dir = std::env::temp_dir().join(format!("claimdag-torn-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    // Nothing there yet is a cold start, and a writer gets an empty graph.
+    assert_eq!(WorkGraph::load_for_write(&dir).unwrap().list().len(), 0);
+
+    let mut graph = WorkGraph::default();
+    for n in 0..5 {
+        ready(&mut graph, &format!("work {n}"));
+    }
+    graph.save_dir(&dir).unwrap();
+    assert_eq!(WorkGraph::load_for_write(&dir).unwrap().list().len(), 5);
+
+    let snapshot = dir.join(claimdag::SNAP_BIN);
+    let whole = std::fs::read(&snapshot).unwrap();
+    std::fs::write(&snapshot, &whole[..whole.len() / 3]).unwrap();
+    let err = match WorkGraph::load_for_write(&dir) {
+        Err(e) => e.to_string(),
+        Ok(_) => panic!("a torn snapshot loaded for writing"),
+    };
+    assert!(err.contains("could not be read"), "{err}");
+    assert!(err.contains("No write saves over it"), "{err}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}

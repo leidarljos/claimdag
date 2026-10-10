@@ -35,7 +35,15 @@ pub fn write_bin(
     }
     let mut f = File::create(&tmp).map_err(|e| e.to_string())?;
     serialize::write_message(&mut f, &message).map_err(|e| e.to_string())?;
+    // The bytes reach the disk before the name moves, and the directory
+    // entry after, so a crash leaves the old snapshot or the new one and
+    // never a renamed file that is still empty.
+    f.sync_all().map_err(|e| e.to_string())?;
+    drop(f);
     std::fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
+    File::open(dir)
+        .and_then(|d| d.sync_all())
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 

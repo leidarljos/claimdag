@@ -4,6 +4,15 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 
 ## Unreleased
 
+- A writer refuses a `work.bin` it cannot read. The command line, the MCP
+  server and the pane loaded such a snapshot as an empty graph, and the
+  next save kept only the node being written: on a truncated snapshot one
+  `upsert` dropped 75 nodes to 1. The refusal names the file and says to
+  restore it or move it aside. The snapshot is synced before the rename
+  and the directory after it.
+- The pane takes the graph lock for a claim, a completion or a reclaim, as
+  the command line and the MCP server do. It loaded and saved without it,
+  so a claim made elsewhere in between was overwritten.
 - With no runtime directory the graph goes to `$XDG_STATE_HOME/claimdag`, else
   `~/.local/state/claimdag`, else `/tmp/claimdag-UID`. The shared
   `/tmp/claimdag` made a second user's first claim fail with `File exists`.
