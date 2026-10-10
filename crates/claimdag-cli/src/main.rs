@@ -8,7 +8,7 @@ use clap::{Parser, Subcommand};
 #[derive(Parser)]
 #[command(name = "claimdag", version, about = "CAS claim and complete on a DAG")]
 struct Cli {
-    /// Directory that holds work.bin (else CLAIMDAG_DIR, else the runtime dir).
+    /// Directory that holds work.bin (else CLAIMDAG_DIR, else the runtime dir, else the state dir).
     #[arg(long)]
     dir: Option<PathBuf>,
     #[command(subcommand)]

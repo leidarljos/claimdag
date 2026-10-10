@@ -1,7 +1,7 @@
 Point at a graph
 ================
 
-``--dir DIR``, else ``CLAIMDAG_DIR``, else ``$XDG_RUNTIME_DIR/claimdag``. The
+``--dir DIR``, else ``CLAIMDAG_DIR``, else ``$XDG_RUNTIME_DIR/claimdag`` (no runtime directory: ``$XDG_STATE_HOME/claimdag``, else ``~/.local/state/claimdag``, else ``/tmp/claimdag-UID``). The
 working directory is never used, so a worker in the wrong directory does
 not invent a second graph. A reader that finds no graph says so rather than
 answering "nothing claimable".
