@@ -13,7 +13,7 @@ Verb                                                                            
 ``renew ID [--actor ID]``                                                                           move the lease, keep the generation
 ``release ID [--actor ID]``                                                                         hand one claim back before it is terminal: ready, no assignee, generation moved
 ``reopen ID [--actor ID]``                                                                          bring a terminal node back to ready, generation moved; the ledger keeps the completion
-``complete ID [--status done\vert failed\vert cancelled] [--summary TEXT] [--actor ID] [--gen N]``  terminal; refused when ``--gen`` is stale
+``complete ID [--status done\vert failed\vert cancelled] [--summary TEXT] [--actor ID] [--gen N]``  terminal; refused when ``--gen`` is stale, and ``done`` is refused while a dependency is unfinished
 ``reclaim [--lease SECS]``                                                                          hand back every claim quiet longer than the lease
 ``link PARENT CHILD`` / ``unlink PARENT CHILD``                                                     a hard dependency
 ``archive ID`` / ``unarchive ID``                                                                   hide or show a terminal node

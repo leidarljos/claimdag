@@ -762,6 +762,18 @@ impl WorkGraph {
         })
     }
 
+    /// The dependencies in `deps` that are not done, as `HEX (status)`, in
+    /// the order given. A dependency missing from the graph reads `missing`.
+    fn unfinished_deps(&self, deps: &[WorkId]) -> Vec<String> {
+        deps.iter()
+            .filter_map(|d| match self.nodes.get(d) {
+                Some(p) if p.status == WorkStatus::Done => None,
+                Some(p) => Some(format!("{} ({})", d.to_hex(), p.status.as_str())),
+                None => Some(format!("{} (missing)", d.to_hex())),
+            })
+            .collect()
+    }
+
     fn recompute_ready(&mut self, id: WorkId) {
         let ready = {
             let Some(n) = self.nodes.get(&id) else {
@@ -1072,6 +1084,20 @@ impl WorkGraph {
             }
             return Ok(());
         }
+        // Done says the work is finished, and work that waits on unfinished
+        // work is not. Failed and cancelled stay open: giving up on a node
+        // does not need what it waits on.
+        if status == WorkStatus::Done {
+            let deps = node.deps.clone();
+            let open = self.unfinished_deps(&deps);
+            if !open.is_empty() {
+                return Err(format!("complete: deps unfinished {}", open.join(" ")));
+            }
+        }
+        let node = self
+            .nodes
+            .get_mut(&id)
+            .ok_or_else(|| "complete: not found".to_string())?;
         node.status = status;
         if !summary.is_empty() {
             node.summary = summary.to_string();
