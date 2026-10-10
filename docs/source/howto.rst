@@ -15,6 +15,18 @@ frees the most work. The Model Context Protocol (MCP) tool ``claimdag_ready`` re
 order with ``waiting_below`` on each row, the critical-path rule of Hu
 (doi:10.1287/opre.9.6.841) and Graham (doi:10.1137/0117039).
 
+Take work with several workers at once
+======================================
+
+.. code:: console
+
+   $ claimdag claim-next --assignee $me --role verifier
+   f7b7df44c9323a9e2a4aee09c5c74725  gen=2
+
+Several workers can read the ready list at once and claim its head. All
+but one are refused. ``claim-next`` chooses and claims under the directory
+lock, so the next worker in sees the claim.
+
 Claim from a tracker id
 =======================
 
@@ -74,6 +86,8 @@ Serve to an agent
 
    $ claimdag-mcp
 
-Tools: ``claimdag_ready``, ``claimdag_list``, ``claimdag_claim``,
-``claimdag_renew``, ``claimdag_release``, ``claimdag_reopen``, ``claimdag_complete``, ``claimdag_reclaim``. Two prompts
+The tools that read are ``claimdag_ready``, ``claimdag_ready_balanced`` and
+``claimdag_list``. The rest change the graph: ``claimdag_claim``,
+``claimdag_claim_next``, ``claimdag_renew``, ``claimdag_release``,
+``claimdag_reopen``, ``claimdag_complete`` and ``claimdag_reclaim``. Two prompts
 sequence taking the next node under a lease and sweeping stale claims.

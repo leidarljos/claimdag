@@ -2,6 +2,13 @@
 
 Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 
+## Unreleased
+
+- The pane missed a second write in the same clock tick; it now compares
+  a hash of the files it reads.
+- The how-to says how several workers take work at once, and its list of
+  tools names `claimdag_ready_balanced` and `claimdag_claim_next`.
+
 ## 0.7.0 (2026-10-09)
 
 - `ready --balanced` and `claim-next` order ready work by role affinity
