@@ -45,7 +45,7 @@ a reader.
 
 | Variable | Meaning |
 |---+---|
-| =CLAIMDAG_DIR= | the graph directory; else =$XDG_RUNTIME_DIR/claimdag= |
+| =CLAIMDAG_DIR= | the graph directory; else =$XDG_RUNTIME_DIR/claimdag=, then =$XDG_STATE_HOME/claimdag=, =~/.local/state/claimdag=, =/tmp/claimdag-UID= |
 
 * Crates
 

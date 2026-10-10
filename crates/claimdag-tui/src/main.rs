@@ -13,7 +13,7 @@ use clap::Parser;
     about = "Terminal work graph over a claimdag work.bin"
 )]
 struct Cli {
-    /// Directory that holds work.bin (else CLAIMDAG_DIR, else the runtime dir).
+    /// Directory that holds work.bin (else CLAIMDAG_DIR, else the runtime dir, else the state dir).
     #[arg(long)]
     dir: Option<PathBuf>,
     /// Print the parent tree as text and exit.
