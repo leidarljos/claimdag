@@ -17,8 +17,8 @@ use std::path::PathBuf;
 /// the point, and `.` puts a `work.bin` in whichever checkout somebody
 /// happened to be standing in.
 ///
-/// A `/tmp/claimdag` this user already owns is still read while the state
-/// directory has no graph, so a seat that claimed under the old default
+/// A `/tmp/claimdag` this user owns that has a graph is still read while
+/// the new default has none, so a seat that claimed under the old default
 /// keeps its graph.
 #[must_use]
 pub fn resolve_dir(explicit: Option<PathBuf>) -> PathBuf {
@@ -38,7 +38,7 @@ pub fn resolve_dir(explicit: Option<PathBuf>) -> PathBuf {
             uid,
         },
     );
-    if defaulted && !picked.exists() && legacy_is_ours(uid) {
+    if defaulted && !picked.join("work.bin").exists() && legacy_is_ours(uid) {
         return PathBuf::from(LEGACY_DIR);
     }
     picked
@@ -47,10 +47,12 @@ pub fn resolve_dir(explicit: Option<PathBuf>) -> PathBuf {
 /// The default before every default was per user.
 const LEGACY_DIR: &str = "/tmp/claimdag";
 
-/// Whether the old shared default is a directory this user owns.
+/// Whether the old shared default is a directory this user owns, holding
+/// a graph.
 fn legacy_is_ours(uid: u32) -> bool {
     use std::os::unix::fs::MetadataExt;
     std::fs::metadata(LEGACY_DIR).is_ok_and(|m| m.is_dir() && m.uid() == uid)
+        && std::path::Path::new(LEGACY_DIR).join("work.bin").exists()
 }
 
 /// The places a default can come from, passed in so the rule can be checked.
@@ -180,7 +182,9 @@ mod tests {
         let home = std::env::temp_dir().join(format!("claimdag-seat-{}", std::process::id()));
         // A graph already in the state directory, so a `/tmp/claimdag` this
         // user happens to own does not stand in for it.
-        std::fs::create_dir_all(home.join(".local/state/claimdag")).unwrap();
+        let state = home.join(".local/state/claimdag");
+        std::fs::create_dir_all(&state).unwrap();
+        std::fs::write(state.join("work.bin"), b"").unwrap();
         set("HOME", home.to_str());
         let out = f(&home);
         let _ = std::fs::remove_dir_all(&home);

@@ -10,15 +10,23 @@ pub struct Lock {
     _file: File,
 }
 
-/// Take the exclusive lock on `dir/lock`, creating the directory. Blocks
-/// while another process holds it.
+/// Take the exclusive lock on `dir/lock`, creating the directory (mode
+/// 0700, so another user cannot read the graph out of `/tmp`). Blocks while
+/// another process holds it.
 ///
 /// # Errors
 ///
 /// Fails when the directory or the lock file cannot be created, or the lock
 /// cannot be taken.
 pub fn lock_dir(dir: &Path) -> Result<Lock, String> {
-    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir)
+            .map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
     // SAFETY: geteuid has no preconditions and cannot fail.
     owned_by(dir, unsafe { libc::geteuid() })?;
     let path = dir.join("lock");
@@ -75,6 +83,21 @@ mod tests {
         let err = owned_by(&dir, mine + 1).unwrap_err();
         assert!(err.contains("not this user"), "{err}");
         assert!(err.contains("CLAIMDAG_DIR"), "{err}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A graph directory the lock makes is this user's alone.
+    #[test]
+    fn a_new_graph_directory_is_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("claimdag-mode-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        drop(lock_dir(&dir.join("graph")).unwrap());
+        let mode = std::fs::metadata(dir.join("graph"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o700);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

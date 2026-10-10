@@ -1,7 +1,10 @@
 Point at a graph
 ================
 
-``--dir DIR``, else ``CLAIMDAG_DIR``, else ``$XDG_RUNTIME_DIR/claimdag`` (no runtime directory: ``$XDG_STATE_HOME/claimdag``, else ``~/.local/state/claimdag``, else ``/tmp/claimdag-UID``). The
+``--dir DIR``, else ``CLAIMDAG_DIR``, else ``$XDG_RUNTIME_DIR/claimdag``. With no
+runtime directory it is ``$XDG_STATE_HOME/claimdag``, else
+``~/.local/state/claimdag``, else ``/tmp/claimdag-UID``. Each default belongs to
+one user, and a graph directory another user owns is refused. The
 working directory is never used, so a worker in the wrong directory does
 not invent a second graph. A reader that finds no graph says so rather than
 answering "nothing claimable".

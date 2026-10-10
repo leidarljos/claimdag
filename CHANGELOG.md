@@ -7,8 +7,9 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 - With no runtime directory the graph goes to `$XDG_STATE_HOME/claimdag`, else
   `~/.local/state/claimdag`, else `/tmp/claimdag-UID`. The shared
   `/tmp/claimdag` made a second user's first claim fail with `File exists`.
-  A `/tmp/claimdag` this user owns is still read while the new path has no
-  graph, and a graph directory another user owns is refused by name.
+  A `/tmp/claimdag` this user owns that has a graph is still read while
+  the new path has none, and a graph directory another user owns is refused
+  by name. A graph directory claimdag makes is mode 0700.
 
 ## 0.7.1 (2026-10-10)
 
