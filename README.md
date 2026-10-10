@@ -22,8 +22,11 @@ The seat that claims through this graph is documented at https://leidarljos.gith
 
 ```console
 $ cargo add claimdag
-$ cargo install --path crates/claimdag-cli
+$ cargo binstall claimdag-cli claimdag-mcp claimdag-tui
 ```
+
+`cargo binstall` fetches the prebuilt binaries from the GitHub release.
+`cargo install` takes the same names and builds from source.
 
 ## First minute
 
