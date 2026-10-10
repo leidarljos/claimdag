@@ -9,6 +9,14 @@ homepage.workspace = true
 description = "Terminal work graph over a claimdag work.bin"
 readme.workspace = true
 
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/claimdag-v{ version }-{ target }.tar.gz"
+bin-dir = "claimdag-v{ version }-{ target }/{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
+# The release tarball or nothing. A target without one fails here, and
+# `cargo install` builds it from source.
+disabled-strategies = ["quick-install", "compile"]
+
 [[bin]]
 name = "claimdag-tui"
 path = "src/main.rs"

@@ -16,18 +16,22 @@ jobs:
             target: x86_64-unknown-linux-gnu
           - os: macos-latest
             target: aarch64-apple-darwin
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-      - run: cargo build --locked --release --target ${{ matrix.target }} -p claimdag-cli -p claimdag-mcp
+      - run: cargo build --locked --release --target ${{ matrix.target }} -p claimdag-cli -p claimdag-mcp -p claimdag-tui
       - run: |
           set -eu
           name="claimdag-${GITHUB_REF_NAME}-${{ matrix.target }}"
           mkdir -p "dist/$name"
-          cp target/${{ matrix.target }}/release/claimdag target/${{ matrix.target }}/release/claimdag-mcp "dist/$name/"
+          cp target/${{ matrix.target }}/release/claimdag target/${{ matrix.target }}/release/claimdag-mcp target/${{ matrix.target }}/release/claimdag-tui "dist/$name/"
           cp README.md CHANGELOG.md LICENSE* "dist/$name/" 2>/dev/null || true
           tar -C dist -czf "dist/$name.tar.gz" "$name"
           (cd dist && shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256")
