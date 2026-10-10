@@ -280,7 +280,7 @@ fn run() -> Result<(), String> {
     let mut g = if reads_only(&cli.cmd) {
         WorkGraph::open_dir(&dir).map_err(|absent| absent.to_string())?
     } else {
-        WorkGraph::load_dir(&dir)
+        WorkGraph::load_for_write(&dir).map_err(|unreadable| unreadable.to_string())?
     };
     match cli.cmd {
         Cmd::List {
