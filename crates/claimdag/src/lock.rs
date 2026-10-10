@@ -19,6 +19,8 @@ pub struct Lock {
 /// cannot be taken.
 pub fn lock_dir(dir: &Path) -> Result<Lock, String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    // SAFETY: geteuid has no preconditions and cannot fail.
+    owned_by(dir, unsafe { libc::geteuid() })?;
     let path = dir.join("lock");
     let file = OpenOptions::new()
         .create(true)
@@ -38,9 +40,43 @@ pub fn lock_dir(dir: &Path) -> Result<Lock, String> {
     Ok(Lock { _file: file })
 }
 
+/// Refuse a graph directory another user owns. A shared default made one
+/// user's claims land in, or fail on, another user's graph.
+///
+/// # Errors
+///
+/// Names the owner and the variable that picks another directory.
+pub fn owned_by(dir: &Path, uid: u32) -> Result<(), String> {
+    use std::os::unix::fs::MetadataExt;
+    let meta = std::fs::metadata(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    if meta.uid() != uid {
+        return Err(format!(
+            "{} belongs to uid {}, not this user (uid {uid}); its graph is not this seat's. \
+             Set CLAIMDAG_DIR or pass --dir to use a directory of your own",
+            dir.display(),
+            meta.uid()
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Another user's directory is refused by name.
+    #[test]
+    fn a_directory_another_user_owns_is_refused() {
+        use std::os::unix::fs::MetadataExt;
+        let dir = std::env::temp_dir().join(format!("claimdag-own-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mine = std::fs::metadata(&dir).unwrap().uid();
+        assert!(owned_by(&dir, mine).is_ok());
+        let err = owned_by(&dir, mine + 1).unwrap_err();
+        assert!(err.contains("not this user"), "{err}");
+        assert!(err.contains("CLAIMDAG_DIR"), "{err}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     /// A second lock waits for the first to drop.
     #[test]
