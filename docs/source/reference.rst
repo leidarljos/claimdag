@@ -3,23 +3,23 @@ Command line
 
 ``claimdag [--dir DIR] VERB``
 
-=================================================================================================== ======================================================================================
-Verb                                                                                                Does
-=================================================================================================== ======================================================================================
-``upsert [--id ID] [--kind K] [--status S] [--role R] [--parent ID] [--summary TEXT] [--actor ID]`` create (mint when ``--id`` is absent) or update a node
-``get ID``                                                                                          one node with its dependencies
-``list [--terminal] [--archived] [--all] [--json]``                                                 nodes, newest first; live work by default
-``claim ID --assignee ID [--gen N]``                                                                compare-and-swap claim; prints the new generation
-``renew ID [--actor ID]``                                                                           move the lease, keep the generation
-``release ID [--actor ID]``                                                                         hand one claim back before it is terminal: ready, no assignee, generation moved
-``reopen ID [--actor ID]``                                                                          bring a terminal node back to ready, generation moved; the ledger keeps the completion
-``complete ID [--status done\vert failed\vert cancelled] [--summary TEXT] [--actor ID] [--gen N]``  terminal; refused when ``--gen`` is stale, and ``done`` is refused while a dependency is unfinished
-``reclaim [--lease SECS]``                                                                          hand back every claim quiet longer than the lease
-``link PARENT CHILD`` / ``unlink PARENT CHILD``                                                     a hard dependency
-``archive ID`` / ``unarchive ID``                                                                   hide or show a terminal node
-``ready [--role R] [--assignee ID] [--slack N] [--balanced] [--json]``                               ready nodes ordered by list scheduling or balanced P2C dispersion
-``claim-next --assignee ID [--role R] [--slack N]``                                                 atomically select and claim the best ready node with role affinity and P2C dispersion
-=================================================================================================== ======================================================================================
+================================================================================================================ =================================================================================================================================================================================
+Verb                                                                                                             Does
+================================================================================================================ =================================================================================================================================================================================
+``upsert [--id ID] [--kind K] [--status S] [--role R] [--parent ID] [--summary TEXT] [--actor ID]``              create (mint when ``--id`` is absent) or update a node
+``get ID``                                                                                                       one node with its dependencies
+``list [--terminal] [--archived] [--all] [--json]``                                                              nodes, newest first; live work by default
+``claim ID --assignee ID [--gen N]``                                                                             compare-and-swap claim; prints the new generation
+``renew ID [--actor ID]``                                                                                        move the lease, keep the generation
+``release ID (--actor ID \vert --force)``                                                                        hand one claim back before it is terminal: ready, no assignee, generation moved. ``--actor`` must be the holder; ``--force`` acts for nobody and appends a line to ``forced.log``
+``reopen ID [--actor ID]``                                                                                       bring a terminal node back to ready, generation moved; the ledger keeps the completion
+``complete ID [--status done\vert failed\vert cancelled] [--summary TEXT] (--actor ID \vert --force) [--gen N]`` terminal; refused when ``--gen`` is stale, and ``done`` is refused while a dependency is unfinished. ``--force`` acts for nobody and appends a line to ``forced.log``
+``reclaim [--lease SECS]``                                                                                       hand back every claim quiet longer than the lease
+``link PARENT CHILD`` / ``unlink PARENT CHILD``                                                                  a hard dependency
+``archive ID`` / ``unarchive ID``                                                                                hide or show a terminal node
+``ready [--role R] [--assignee ID] [--slack N] [--balanced] [--json]``                                           ready nodes ordered by list scheduling or balanced P2C dispersion
+``claim-next --assignee ID [--role R] [--slack N]``                                                              atomically select and claim the best ready node with role affinity and P2C dispersion
+================================================================================================================ =================================================================================================================================================================================
 
 Ids are 32 lowercase hex characters (xxHash3-128). The zero id means unset.
 

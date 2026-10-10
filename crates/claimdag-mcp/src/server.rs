@@ -284,7 +284,7 @@ impl ClaimdagServer {
     }
 
     #[tool(
-        description = "Hand one claim back on purpose before the work is terminal: the node is ready again, the assignee clears, and the generation moves so the token you held is fenced. Call this when you stop working on a node without finishing it; until you do, you stay busy and cannot claim anything else.",
+        description = "Hand one claim back on purpose before the work is terminal: the node is ready again, the assignee clears, and the generation moves so the token you held is fenced. Call this when you stop working on a node without finishing it; until you do, you stay busy and cannot claim anything else. The actor must be the holder; the zero id is refused.",
         annotations(
             title = "Hand a claim back",
             read_only_hint = false,
@@ -336,7 +336,7 @@ impl ClaimdagServer {
     }
 
     #[tool(
-        description = "Complete a node. Pass the generation claim gave you: without it the complete goes through even if your lease was reclaimed and somebody else has the work. Done is refused while a dependency is unfinished, and the error names it. Terminal is sticky.",
+        description = "Complete a node. Pass the generation claim gave you: without it the complete goes through even if your lease was reclaimed and somebody else has the work. Done is refused while a dependency is unfinished, and the error names it. The zero actor is refused. Terminal is sticky.",
         annotations(
             title = "Complete the node",
             read_only_hint = false,

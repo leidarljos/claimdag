@@ -287,6 +287,7 @@ dependencies = [
  "claimdag",
  "clap",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]

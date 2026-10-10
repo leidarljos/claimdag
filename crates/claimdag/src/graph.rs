@@ -24,6 +24,13 @@ pub const SNAP_FILE: &str = crate::snap::SNAP_BIN;
 const MAX_WORK_NODES: usize = 4096;
 const MAX_LEDGER: usize = 8192;
 
+/// The refusal for a release that names nobody.
+const NO_ACTOR_RELEASE: &str =
+    "release: no actor; name the holder, or force it (a forced release is logged)";
+/// The refusal for a complete that names nobody.
+const NO_ACTOR_COMPLETE: &str =
+    "complete: no actor; name the holder, or force it (a forced complete is logged)";
+
 /// Work node status (CAS claim/complete).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkStatus {
@@ -963,8 +970,29 @@ impl WorkGraph {
     /// Hand one claim back on purpose. The node returns to `ready`, the
     /// assignee clears, and the generation moves, exactly as a reclaim does:
     /// the holder chose to stop before the lease ran out. Only the holder may
-    /// do it; a zero actor is the command line's escape.
+    /// do it. A zero actor is refused; [`WorkGraph::release_forced`] is the
+    /// explicit way to hand back a claim for nobody.
     pub fn release(&mut self, id: WorkId, actor: WorkId) -> Result<u64, String> {
+        if actor.is_zero() {
+            return Err(NO_ACTOR_RELEASE.into());
+        }
+        self.release_as(id, actor, false)
+            .map(|(generation, _)| generation)
+    }
+
+    /// Hand a claim back whoever holds it. The ledger records the op as
+    /// `release-forced`. Returns the new generation and the holder it was
+    /// taken from, so the caller can log both.
+    pub fn release_forced(&mut self, id: WorkId) -> Result<(u64, WorkId), String> {
+        self.release_as(id, WorkId::ZERO, true)
+    }
+
+    fn release_as(
+        &mut self,
+        id: WorkId,
+        actor: WorkId,
+        forced: bool,
+    ) -> Result<(u64, WorkId), String> {
         let node = self
             .nodes
             .get_mut(&id)
@@ -972,7 +1000,7 @@ impl WorkGraph {
         if !matches!(node.status, WorkStatus::Claimed | WorkStatus::Running) {
             return Err(format!("release: status {}", node.status.as_str()));
         }
-        if !node.assignee.is_zero() && !actor.is_zero() && node.assignee != actor {
+        if !forced && !node.assignee.is_zero() && node.assignee != actor {
             return Err("release: not assignee".into());
         }
         let holder = node.assignee;
@@ -981,8 +1009,9 @@ impl WorkGraph {
         node.cas_gen = node.cas_gen.saturating_add(1);
         node.updated_unix = Self::now();
         let generation = node.cas_gen;
-        self.push_ledger(id, holder, "release");
-        Ok(generation)
+        let op = if forced { "release-forced" } else { "release" };
+        self.push_ledger(id, holder, op);
+        Ok((generation, holder))
     }
 
     /// Bring a terminal node back to `ready`, generation moved, so work on
@@ -1048,7 +1077,9 @@ impl WorkGraph {
 
     /// Finish a node. `expected_gen` is the fencing token from the claim: the
     /// generation moves on every claim and reclaim, so a stale holder is
-    /// refused. `None` skips the check.
+    /// refused. `None` skips the check. A zero actor is refused;
+    /// [`WorkGraph::complete_forced`] is the explicit way to finish a node
+    /// for nobody.
     pub fn complete(
         &mut self,
         id: WorkId,
@@ -1057,6 +1088,35 @@ impl WorkGraph {
         actor: WorkId,
         expected_gen: Option<u64>,
     ) -> Result<(), String> {
+        if actor.is_zero() {
+            return Err(NO_ACTOR_COMPLETE.into());
+        }
+        self.complete_as(id, status, summary, actor, expected_gen, false)
+            .map(|_| ())
+    }
+
+    /// Finish a node whoever holds it. Dependencies and `expected_gen` are
+    /// still checked. The ledger records the op as `complete-forced`.
+    /// Returns the holder the node had, so the caller can log it.
+    pub fn complete_forced(
+        &mut self,
+        id: WorkId,
+        status: WorkStatus,
+        summary: &str,
+        expected_gen: Option<u64>,
+    ) -> Result<WorkId, String> {
+        self.complete_as(id, status, summary, WorkId::ZERO, expected_gen, true)
+    }
+
+    fn complete_as(
+        &mut self,
+        id: WorkId,
+        status: WorkStatus,
+        summary: &str,
+        actor: WorkId,
+        expected_gen: Option<u64>,
+        forced: bool,
+    ) -> Result<WorkId, String> {
         if !status.is_terminal() {
             return Err("complete: status not terminal".into());
         }
@@ -1075,14 +1135,15 @@ impl WorkGraph {
         }
         // Whoever held it may still speak for it; checked before the terminal
         // case so a stranger cannot rewrite a finished node.
-        if !node.assignee.is_zero() && !actor.is_zero() && node.assignee != actor {
+        if !forced && !node.assignee.is_zero() && node.assignee != actor {
             return Err("complete: not assignee".into());
         }
+        let holder = node.assignee;
         if node.status.is_terminal() {
             if !summary.is_empty() {
                 node.summary = summary.to_string();
             }
-            return Ok(());
+            return Ok(holder);
         }
         // Done says the work is finished, and work that waits on unfinished
         // work is not. Failed and cancelled stay open: giving up on a node
@@ -1104,9 +1165,14 @@ impl WorkGraph {
         }
         node.finished_unix = now;
         node.updated_unix = now;
-        self.push_ledger(id, actor, "complete");
+        let op = if forced {
+            "complete-forced"
+        } else {
+            "complete"
+        };
+        self.push_ledger(id, actor, op);
         self.promote_dependents(id);
-        Ok(())
+        Ok(holder)
     }
 
     pub fn archive(&mut self, id: WorkId, actor: WorkId) -> Result<(), String> {

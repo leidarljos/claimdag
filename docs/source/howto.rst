@@ -46,7 +46,7 @@ Fence a completion
 
    $ gen=$(claimdag claim $id --assignee $me | sed 's/gen=//')
    $ ... work ...
-   $ claimdag complete $id --status done --gen $gen
+   $ claimdag complete $id --status done --actor $me --gen $gen
 
 Pass the generation you were given. If the node was reclaimed and taken by
 someone else in between, the completion is refused.
