@@ -2,7 +2,7 @@
 
 Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 
-## Unreleased
+## 0.7.1 (2026-10-10)
 
 - The pane missed a second write in the same clock tick; it now compares
   a hash of the files it reads.
