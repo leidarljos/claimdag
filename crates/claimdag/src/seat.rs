@@ -24,15 +24,12 @@ use std::path::PathBuf;
 pub fn resolve_dir(explicit: Option<PathBuf>) -> PathBuf {
     // SAFETY: geteuid has no preconditions and cannot fail.
     let uid = unsafe { libc::geteuid() };
-    let runtime = std::env::var_os("XDG_RUNTIME_DIR");
-    let defaulted = explicit.is_none()
-        && std::env::var_os("CLAIMDAG_DIR").is_none_or(|v| v.is_empty())
-        && absolute(runtime.clone()).is_none();
+    let defaulted = explicit.is_none() && defaults_decide();
     let picked = dir_from(
         explicit,
         std::env::var_os("CLAIMDAG_DIR"),
         Fallbacks {
-            runtime,
+            runtime: std::env::var_os("XDG_RUNTIME_DIR"),
             state: std::env::var_os("XDG_STATE_HOME"),
             home: std::env::var_os("HOME"),
             uid,
@@ -42,6 +39,23 @@ pub fn resolve_dir(explicit: Option<PathBuf>) -> PathBuf {
         return PathBuf::from(LEGACY_DIR);
     }
     picked
+}
+
+/// Whether neither `CLAIMDAG_DIR` nor the runtime directory names the
+/// graph, so the state directory, `/tmp/claimdag-UID` or the old
+/// `/tmp/claimdag` picks it.
+fn defaults_decide() -> bool {
+    std::env::var_os("CLAIMDAG_DIR").is_none_or(|v| v.is_empty())
+        && absolute(std::env::var_os("XDG_RUNTIME_DIR")).is_none()
+}
+
+/// Whether `dir` is the graph directory the defaults pick: the state
+/// directory, `/tmp/claimdag-UID` or the old `/tmp/claimdag`. Only such a
+/// directory is checked for its owner; one named by `CLAIMDAG_DIR` or
+/// `--dir` is used as given.
+#[must_use]
+pub fn is_default_dir(dir: &std::path::Path) -> bool {
+    defaults_decide() && resolve_dir(None) == dir
 }
 
 /// The default before every default was per user.
@@ -195,6 +209,25 @@ mod tests {
             }
         }
         out
+    }
+
+    /// Only the directory the defaults pick is checked for its owner; one
+    /// a variable names is used as given, even where it matches a default.
+    #[test]
+    fn only_a_default_directory_is_a_default() {
+        with_env(None, None, |home| {
+            assert!(is_default_dir(&home.join(".local/state/claimdag")));
+            assert!(!is_default_dir(std::path::Path::new("/shared/team/claims")));
+        });
+        with_env(Some("/shared/team/claims"), None, |home| {
+            assert!(!is_default_dir(std::path::Path::new("/shared/team/claims")));
+            assert!(!is_default_dir(&home.join(".local/state/claimdag")));
+        });
+        with_env(None, Some("/run/user/1000"), |_| {
+            assert!(!is_default_dir(std::path::Path::new(
+                "/run/user/1000/claimdag"
+            )));
+        });
     }
 
     #[test]
