@@ -336,7 +336,7 @@ impl ClaimdagServer {
     }
 
     #[tool(
-        description = "Complete a node. Pass the generation claim gave you: without it the complete goes through even if your lease was reclaimed and somebody else has the work. Terminal is sticky.",
+        description = "Complete a node. Pass the generation claim gave you: without it the complete goes through even if your lease was reclaimed and somebody else has the work. Done is refused while a dependency is unfinished, and the error names it. Terminal is sticky.",
         annotations(
             title = "Complete the node",
             read_only_hint = false,

@@ -187,6 +187,41 @@ fn a_failed_dependency_does_not_ready_what_waited_on_it() {
     assert!(graph.claim(blocked, actor(8), None).is_err());
 }
 
+/// Done says the work is finished. A node whose dependency is still open is
+/// not, so `done` is refused and the refusal names what is open. Giving up
+/// with `failed` or `cancelled` does not need the dependency.
+#[test]
+fn done_waits_for_the_dependencies() {
+    let mut graph = WorkGraph::default();
+    let first = ready(&mut graph, "first");
+    let second = ready(&mut graph, "second");
+    let third = ready(&mut graph, "third");
+    graph.link_dep(first, second, actor(1)).expect("link");
+    let early = graph.complete(second, WorkStatus::Done, "", actor(7), None);
+    let err = early.expect_err("done went through with its dependency open");
+    assert!(
+        err.starts_with("complete: deps unfinished"),
+        "unexpected refusal: {err}"
+    );
+    assert!(
+        err.contains(&first.to_hex()),
+        "{err} does not name the dependency"
+    );
+    assert!(err.contains("(ready)"), "{err} does not give its status");
+    assert_eq!(graph.get(second).map(|n| n.status), Some(WorkStatus::Todo));
+
+    graph.link_dep(third, second, actor(1)).expect("link");
+    graph
+        .complete(second, WorkStatus::Cancelled, "dropped", actor(7), None)
+        .expect("cancel does not wait on dependencies");
+
+    let holder = actor(8);
+    graph.claim(first, holder, None).expect("claim");
+    graph
+        .complete(first, WorkStatus::Done, "", holder, None)
+        .expect("a node with no dependencies finishes");
+}
+
 /// The parent chain is a forest. A dependency edge is refused when it would
 /// close a loop, and the parent edge has to be refused for the same reason:
 /// every reader that draws the tree, or walks up from a node to find its root,

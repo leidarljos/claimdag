@@ -4,6 +4,10 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 
 ## Unreleased
 
+- `complete --status done` is refused while a dependency is unfinished,
+  and the refusal names each open dependency with its status. A node could
+  be marked done with its dependency still ready, and its dependents were
+  then promoted. `failed` and `cancelled` still go through.
 - A writer refuses a `work.bin` it cannot read. The command line, the MCP
   server and the pane loaded such a snapshot as an empty graph, and the
   next save kept only the node being written: on a truncated snapshot one
