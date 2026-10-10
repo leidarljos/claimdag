@@ -39,7 +39,7 @@ pub struct App {
     /// The last thing that happened, drawn in the status line.
     pub message: String,
     /// What the files looked like at the last reload.
-    stamp: u128,
+    stamp: u64,
     /// How long a claim may go quiet before the pane hands it back; the graph
     /// takes the lease per call.
     pub lease: u64,
@@ -105,16 +105,15 @@ impl App {
         }
     }
 
-    /// The newest write time across the files the pane reads.
-    fn snapshot_stamp(&self) -> u128 {
-        ["work.bin", "handles.json"]
-            .iter()
-            .filter_map(|name| std::fs::metadata(self.dir.join(name)).ok())
-            .filter_map(|meta| meta.modified().ok())
-            .filter_map(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|since| since.as_nanos())
-            .max()
-            .unwrap_or(0)
+    /// A hash of the files the pane reads. Write time is not enough: two
+    /// saves inside one clock tick share it.
+    fn snapshot_stamp(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        for name in ["work.bin", "handles.json"] {
+            std::fs::read(self.dir.join(name)).ok().hash(&mut hasher);
+        }
+        hasher.finish()
     }
 
     /// Load, mutate, save. The graph is the only writer of its own rules.
@@ -361,7 +360,6 @@ mod tests {
                 },
             )
             .unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(10));
         graph.save_dir(dir.path()).unwrap();
 
         app.poll();
