@@ -108,6 +108,13 @@ impl ClaimdagServer {
         WorkGraph::open_dir(&self.dir).map_err(|absent: Absent| bad(absent.to_string()))
     }
 
+    /// The graph a writing verb starts from. The caller holds the lock. A
+    /// snapshot that does not parse is refused, never replaced by an empty
+    /// graph and saved over.
+    fn writing(&self) -> Result<WorkGraph, McpError> {
+        WorkGraph::load_for_write(&self.dir).map_err(|absent: Absent| bad(absent.to_string()))
+    }
+
     #[tool(
         description = "Work that can be taken right now: unblocked, unheld, and not finished, deepest chain first. Take the first one: the order is the critical path, so the head of a long chain outranks a leaf nothing waits on. Ask this before anything else. An empty answer means the seat is quiet; a failure means there is no graph here, which is a different thing.",
         annotations(
@@ -210,7 +217,7 @@ impl ClaimdagServer {
         let id = parse(&args.id)?;
         let assignee = parse(&args.assignee)?;
         let _lock = claimdag::lock_dir(&self.dir).map_err(bad)?;
-        let mut graph = WorkGraph::load_dir(&self.dir);
+        let mut graph = self.writing()?;
         let generation = graph.claim(id, assignee, args.generation).map_err(bad)?;
         graph.save_dir(&self.dir).map_err(bad)?;
         Ok(Json(ClaimRow {
@@ -241,7 +248,7 @@ impl ClaimdagServer {
             .unwrap_or(WorkRole::Unset);
         let slack = args.slack.unwrap_or(1);
         let _lock = claimdag::lock_dir(&self.dir).map_err(bad)?;
-        let mut graph = WorkGraph::load_dir(&self.dir);
+        let mut graph = self.writing()?;
         let (id, generation) = graph.claim_next(assignee, role, slack).map_err(bad)?;
         graph.save_dir(&self.dir).map_err(bad)?;
         Ok(Json(ClaimRow {
@@ -267,7 +274,7 @@ impl ClaimdagServer {
         let id = parse(&args.id)?;
         let actor = parse(&args.actor)?;
         let _lock = claimdag::lock_dir(&self.dir).map_err(bad)?;
-        let mut graph = WorkGraph::load_dir(&self.dir);
+        let mut graph = self.writing()?;
         let generation = graph.renew(id, actor).map_err(bad)?;
         graph.save_dir(&self.dir).map_err(bad)?;
         Ok(Json(ClaimRow {
@@ -293,7 +300,7 @@ impl ClaimdagServer {
         let id = parse(&args.id)?;
         let actor = parse(&args.actor)?;
         let _lock = claimdag::lock_dir(&self.dir).map_err(bad)?;
-        let mut graph = WorkGraph::load_dir(&self.dir);
+        let mut graph = self.writing()?;
         let generation = graph.release(id, actor).map_err(bad)?;
         graph.save_dir(&self.dir).map_err(bad)?;
         Ok(Json(ClaimRow {
@@ -319,7 +326,7 @@ impl ClaimdagServer {
         let id = parse(&args.id)?;
         let actor = parse(&args.actor)?;
         let _lock = claimdag::lock_dir(&self.dir).map_err(bad)?;
-        let mut graph = WorkGraph::load_dir(&self.dir);
+        let mut graph = self.writing()?;
         let generation = graph.reopen(id, actor).map_err(bad)?;
         graph.save_dir(&self.dir).map_err(bad)?;
         Ok(Json(ClaimRow {
@@ -356,7 +363,7 @@ impl ClaimdagServer {
             }
         };
         let _lock = claimdag::lock_dir(&self.dir).map_err(bad)?;
-        let mut graph = WorkGraph::load_dir(&self.dir);
+        let mut graph = self.writing()?;
         graph
             .complete(
                 id,
@@ -393,7 +400,7 @@ impl ClaimdagServer {
         Parameters(args): Parameters<ReclaimArgs>,
     ) -> Result<Json<Vec<String>>, McpError> {
         let _lock = claimdag::lock_dir(&self.dir).map_err(bad)?;
-        let mut graph = WorkGraph::load_dir(&self.dir);
+        let mut graph = self.writing()?;
         let handed = graph.reclaim(args.lease_seconds);
         if !handed.is_empty() {
             graph.save_dir(&self.dir).map_err(bad)?;
@@ -490,6 +497,30 @@ mod tests {
                 "claimdag_reopen".to_string(),
             ]
         );
+    }
+
+    /// A torn snapshot refuses a writing tool and stays on disk as it was.
+    #[tokio::test]
+    async fn a_writing_tool_does_not_save_over_a_torn_snapshot() {
+        let (dir, server) = seat();
+        let node = work(dir.path(), "the work");
+        work(dir.path(), "other work");
+        let snapshot = dir.path().join(claimdag::SNAP_BIN);
+        let whole = std::fs::read(&snapshot).unwrap();
+        let torn = whole[..whole.len() / 2].to_vec();
+        std::fs::write(&snapshot, &torn).unwrap();
+        let Err(err) = server
+            .claimdag_claim(Parameters(ClaimArgs {
+                id: node.to_hex(),
+                assignee: WorkId { hi: 7, lo: 7 }.to_hex(),
+                generation: None,
+            }))
+            .await
+        else {
+            panic!("claimed on a torn snapshot");
+        };
+        assert!(format!("{err:?}").contains("could not be read"), "{err:?}");
+        assert_eq!(std::fs::read(&snapshot).unwrap(), torn);
     }
 
     /// An agent's whole loop: find work, take it, keep the token, finish with

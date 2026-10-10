@@ -117,16 +117,28 @@ impl App {
     }
 
     /// Load, mutate, save. The graph is the only writer of its own rules.
+    ///
+    /// The lock is the one the command line and the MCP server take, held from
+    /// load to save, so a claim made elsewhere between the two is not
+    /// overwritten. A snapshot that does not parse is refused.
     fn mutate(&mut self, done: &str, change: impl FnOnce(&mut WorkGraph) -> Result<(), String>) {
-        let mut graph = WorkGraph::load_dir(&self.dir);
-        self.message = match change(&mut graph) {
+        self.message = match self.locked(change) {
             Err(why) => why,
-            Ok(()) => match graph.save_dir(&self.dir) {
-                Err(why) => why,
-                Ok(()) => done.to_string(),
-            },
+            Ok(()) => done.to_string(),
         };
         self.reload();
+    }
+
+    /// Lock, load for writing, change, save, unlock.
+    fn locked<T>(
+        &self,
+        change: impl FnOnce(&mut WorkGraph) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let _lock = claimdag::lock_dir(&self.dir)?;
+        let mut graph = WorkGraph::load_for_write(&self.dir).map_err(|e| e.to_string())?;
+        let out = change(&mut graph)?;
+        graph.save_dir(&self.dir)?;
+        Ok(out)
     }
 
     /// Handle one key.
@@ -193,20 +205,12 @@ impl App {
 
     /// Hand back every claim quiet longer than the lease, not only the selected one.
     fn reclaim(&mut self) {
-        // Not through `mutate`, because the count has to come back out and a
-        // closure that owns it cannot hand it over.
-        let mut graph = WorkGraph::load_dir(&self.dir);
-        let handed = graph.reclaim(self.lease);
-        self.message = if handed.is_empty() {
-            format!("nothing has been quiet for {}s", self.lease)
-        } else {
-            match graph.save_dir(&self.dir) {
-                Err(why) => why,
-                Ok(()) => match handed.len() {
-                    1 => "handed back 1 claim".to_string(),
-                    n => format!("handed back {n} claims"),
-                },
-            }
+        let lease = self.lease;
+        self.message = match self.locked(|graph| Ok(graph.reclaim(lease).len())) {
+            Err(why) => why,
+            Ok(0) => format!("nothing has been quiet for {lease}s"),
+            Ok(1) => "handed back 1 claim".to_string(),
+            Ok(n) => format!("handed back {n} claims"),
         };
         self.reload();
     }
@@ -301,6 +305,22 @@ mod tests {
         assert_eq!(app.message, "claimed", "{}", app.message);
         let graph = WorkGraph::load_dir(dir.path());
         assert_eq!(graph.get(id).unwrap().assignee, actor());
+    }
+
+    /// A torn snapshot is refused by the pane too, and left on disk as it
+    /// was, rather than saved over with the one node the key touched.
+    #[test]
+    fn the_pane_does_not_save_over_a_torn_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        seeded(dir.path());
+        let mut app = App::open(dir.path().to_path_buf(), actor());
+        let snapshot = dir.path().join(claimdag::SNAP_BIN);
+        let whole = std::fs::read(&snapshot).unwrap();
+        let torn = &whole[..whole.len() / 2];
+        std::fs::write(&snapshot, torn).unwrap();
+        app.handle_key(key(KeyCode::Char('c')));
+        assert!(app.message.contains("could not be read"), "{}", app.message);
+        assert_eq!(std::fs::read(&snapshot).unwrap(), torn);
     }
 
     /// The pane must not be a way around the guard the command line obeys.

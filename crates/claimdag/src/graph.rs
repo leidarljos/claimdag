@@ -244,8 +244,10 @@ impl std::fmt::Display for Absent {
             ),
             Self::Unreadable(dir, why) => write!(
                 f,
-                "the work graph at {} could not be read: {why}",
-                dir.display()
+                "the work graph at {} could not be read: {why}. No write saves over it: \
+                 restore {} from a copy, or move it aside to start an empty graph",
+                dir.display(),
+                crate::snap::SNAP_BIN
             ),
         }
     }
@@ -1169,8 +1171,27 @@ impl WorkGraph {
         }
     }
 
-    /// The graph in a directory, empty when there is none: a writer's view.
-    /// Readers want [`WorkGraph::open_dir`].
+    /// The graph a writer starts from: empty when the seat has none yet, and
+    /// refused when a snapshot is there but cannot be read.
+    ///
+    /// [`WorkGraph::load_dir`] answers an unreadable snapshot with an empty
+    /// graph, so the next save replaces every node with the one being
+    /// written. A torn or truncated `work.bin` has to stop the writer instead.
+    ///
+    /// # Errors
+    ///
+    /// [`Absent::Unreadable`] when `work.bin` exists and does not parse.
+    pub fn load_for_write(dir: &Path) -> Result<Self, Absent> {
+        match Self::open_dir(dir) {
+            Ok(graph) => Ok(graph),
+            Err(Absent::NoDirectory(_) | Absent::NoSnapshot(_)) => Ok(Self::default()),
+            Err(unreadable) => Err(unreadable),
+        }
+    }
+
+    /// The graph in a directory, empty when there is none or it cannot be
+    /// read. A writer wants [`WorkGraph::load_for_write`], a reader
+    /// [`WorkGraph::open_dir`].
     pub fn load_dir(dir: &Path) -> Self {
         match crate::snap::read_bin(dir) {
             Ok((next_seq, mint_seq, nodes)) => {
