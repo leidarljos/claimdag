@@ -187,6 +187,11 @@ pub struct WorkNode {
     pub archived: bool,
 }
 
+/// One operation, as the graph saw it in this process.
+///
+/// The ledger lives in memory only. `work.bin` does not store it, so a
+/// command-line call starts with an empty ledger and its entries are gone
+/// when it exits. It is not a history of the graph.
 #[derive(Debug, Clone)]
 pub struct WorkLedgerEntry {
     pub seq: u64,
@@ -1015,8 +1020,9 @@ impl WorkGraph {
     }
 
     /// Bring a terminal node back to `ready`, generation moved, so work on
-    /// the same tracker id can be taken again. The ledger keeps the earlier
-    /// completion; this is a new sitting on old work, not an erasure.
+    /// the same tracker id can be taken again: a new sitting on old work.
+    /// The snapshot keeps no history of operations, so nothing on disk
+    /// records the earlier completion; see [`WorkLedgerEntry`].
     pub fn reopen(&mut self, id: WorkId, actor: WorkId) -> Result<u64, String> {
         let node = self
             .nodes

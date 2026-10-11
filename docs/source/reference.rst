@@ -12,7 +12,7 @@ Verb                                                                            
 ``claim ID --assignee ID [--gen N]``                                                                             compare-and-swap claim; prints the new generation
 ``renew ID [--actor ID]``                                                                                        move the lease, keep the generation
 ``release ID (--actor ID \vert --force)``                                                                        hand one claim back before it is terminal: ready, no assignee, generation moved. ``--actor`` must be the holder; ``--force`` acts for nobody and appends a line to ``forced.log``
-``reopen ID [--actor ID]``                                                                                       bring a terminal node back to ready, generation moved; the ledger keeps the completion
+``reopen ID [--actor ID]``                                                                                       bring a terminal node back to ready, generation moved. No record of the earlier completion is kept on disk
 ``complete ID [--status done\vert failed\vert cancelled] [--summary TEXT] (--actor ID \vert --force) [--gen N]`` terminal; refused when ``--gen`` is stale, and ``done`` is refused while a dependency is unfinished. ``--force`` acts for nobody and appends a line to ``forced.log``
 ``reclaim [--lease SECS]``                                                                                       hand back every claim quiet longer than the lease
 ``link PARENT CHILD`` / ``unlink PARENT CHILD``                                                                  a hard dependency

@@ -310,7 +310,7 @@ impl ClaimdagServer {
     }
 
     #[tool(
-        description = "Bring a finished node back to ready, generation moved, so the same work can be claimed again: a new sitting on old work. The ledger keeps the earlier completion. Refused on a node that is not terminal.",
+        description = "Bring a finished node back to ready, generation moved, so the same work can be claimed again: a new sitting on old work. No record of the earlier completion is kept on disk. Refused on a node that is not terminal.",
         annotations(
             title = "Reopen finished work",
             read_only_hint = false,
