@@ -43,7 +43,7 @@ works; see the ljos site. On its own, claimdag takes 32-hex ids only.
 #+begin_src console
 $ gen=$(claimdag claim $id --assignee $me | sed 's/gen=//')
 $ ... work ...
-$ claimdag complete $id --status done --gen $gen
+$ claimdag complete $id --status done --actor $me --gen $gen
 #+end_src
 
 Pass the generation you were given. If the node was reclaimed and taken by

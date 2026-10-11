@@ -52,7 +52,7 @@ First minute
    gen=2
    $ claimdag list
    092dca29...  claimed  task  00000000  gen=2  parse the manifest header
-   $ claimdag complete $a --status done
+   $ claimdag complete $a --status done --actor $(printf '%032x' 7)
    092dca29...  done
 
 The :doc:`tutorial <getting-started>` is this first minute, then a second node that waits on the first.

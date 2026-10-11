@@ -54,7 +54,7 @@ now somebody else's.
 
 .. code:: console
 
-   $ claimdag complete $a --status done --gen 2
+   $ claimdag complete $a --status done --actor $me --gen 2
    092dca29...  done
    $ claimdag list
    71368334...  ready  task  gen=1  reject a manifest with no header

@@ -187,6 +187,47 @@ fn a_failed_dependency_does_not_ready_what_waited_on_it() {
     assert!(graph.claim(blocked, actor(8), None).is_err());
 }
 
+/// The zero actor used to mean "anyone" to release and complete, and it was
+/// the default on the command line. Now it is refused, and acting for nobody
+/// is its own call that the ledger names.
+#[test]
+fn the_zero_actor_is_refused_and_force_is_explicit() {
+    let mut graph = WorkGraph::default();
+    let node = ready(&mut graph, "held");
+    let holder = actor(7);
+    let held_gen = graph.claim(node, holder, None).expect("claim");
+    let release = graph
+        .release(node, WorkId::ZERO)
+        .expect_err("zero released");
+    assert!(release.starts_with("release: no actor"), "{release}");
+    let done = graph
+        .complete(node, WorkStatus::Done, "", WorkId::ZERO, None)
+        .expect_err("zero completed");
+    assert!(done.starts_with("complete: no actor"), "{done}");
+    assert_eq!(graph.get(node).map(|n| n.assignee), Some(holder));
+
+    let (generation, was) = graph.release_forced(node).expect("forced release");
+    assert_eq!(was, holder);
+    assert!(
+        generation > held_gen,
+        "a forced release moves the generation"
+    );
+    assert_eq!(graph.get(node).map(|n| n.assignee), Some(WorkId::ZERO));
+
+    let next = actor(8);
+    let fresh = graph.claim(node, next, None).expect("claim again");
+    assert!(
+        graph
+            .complete_forced(node, WorkStatus::Done, "", Some(held_gen))
+            .is_err(),
+        "a forced complete skipped the fencing token"
+    );
+    let was = graph
+        .complete_forced(node, WorkStatus::Done, "", Some(fresh))
+        .expect("forced complete");
+    assert_eq!(was, next);
+}
+
 /// Done says the work is finished. A node whose dependency is still open is
 /// not, so `done` is refused and the refusal names what is open. Giving up
 /// with `failed` or `cancelled` does not need the dependency.

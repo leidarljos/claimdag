@@ -4,6 +4,12 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 
 ## Unreleased
 
+- `release` and `complete` need an actor. `--actor` defaulted to the zero
+  id, and the graph read zero as "anyone", so a call that named nobody
+  could hand back or finish another seat's claim. A call with no `--actor`,
+  or with the zero id, is refused. `--force` acts for nobody: it prints a
+  line on stderr and appends one to `forced.log` in the graph directory.
+  The library has `release_forced` and `complete_forced` for the same.
 - `complete --status done` is refused while a dependency is unfinished,
   and the refusal names each open dependency with its status. A node could
   be marked done with its dependency still ready, and its dependents were
