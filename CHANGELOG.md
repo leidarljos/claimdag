@@ -4,6 +4,10 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 
 ## Unreleased
 
+- The docs no longer say the ledger keeps a reopened node's completion.
+  The ledger is in memory only and `work.bin` does not store it, so each
+  command-line call starts with it empty. `reopen` keeps no record of the
+  earlier completion on disk.
 - `release` and `complete` need an actor. `--actor` defaulted to the zero
   id, and the graph read zero as "anyone", so a call that named nobody
   could hand back or finish another seat's claim. A call with no `--actor`,
