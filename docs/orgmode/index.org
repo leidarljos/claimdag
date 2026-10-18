@@ -1,4 +1,5 @@
 #+title: claimdag
+#+description: Compare-and-swap claims over a session's work graph, with leases.
 #+options: toc:nil num:nil
 
 #+begin_export rst

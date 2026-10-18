@@ -1,4 +1,5 @@
 #+title: Reference
+#+description: Verbs, statuses, and the snapshot file.
 #+options: toc:nil num:nil
 
 * Command line

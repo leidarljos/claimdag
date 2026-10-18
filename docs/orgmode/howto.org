@@ -1,4 +1,5 @@
 #+title: How-to
+#+description: Point at a graph, take the next node, archive finished work, and drive the pane.
 #+options: toc:nil num:nil
 
 * Point at a graph
