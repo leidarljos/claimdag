@@ -1,4 +1,5 @@
 #+title: Getting started
+#+description: Two nodes, one waiting on the other, and a claim a second worker cannot steal.
 #+options: toc:nil num:nil
 
 Everything below runs in a scratch directory. By the end you will have two

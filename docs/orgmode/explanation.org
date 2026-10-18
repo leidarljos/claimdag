@@ -1,4 +1,5 @@
 #+title: Explanation
+#+description: Why a claim is a lease and a generation is a fence.
 #+options: toc:nil num:nil
 
 * A claim is a lease

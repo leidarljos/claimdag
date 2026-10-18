@@ -1,0 +1,11 @@
+{% extends "!base.html" %}
+{% block htmltitle %}
+{%- set page_name = share_name|default(title) -%}
+{%- if not docstitle -%}
+<title>{{ page_name|striptags|e }}</title>
+{%- elif pagename == root_doc -%}
+<title>{{ docstitle|striptags|e }}</title>
+{%- else -%}
+<title>{{ page_name|striptags|e }} - {{ docstitle|striptags|e }}</title>
+{%- endif -%}
+{% endblock %}

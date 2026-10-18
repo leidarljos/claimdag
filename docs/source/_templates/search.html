@@ -1,0 +1,10 @@
+{%- extends "basic/search.html" %}
+
+{% block searchbox %}
+  <form class="searchform" action="" method="get" role="search">
+    <label class="ll-sr" for="search-query">Search documentation</label>
+    <input id="search-query" type="text" name="q" value="" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+    <button type="submit">{{ _('search') }}</button>
+  </form>
+  <p><span id="search-progress"></span></p>
+{% endblock %}

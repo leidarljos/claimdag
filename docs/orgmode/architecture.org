@@ -1,4 +1,5 @@
 #+title: claimdag architecture
+#+description: One writer. Unpacked Cap'n on disk. Hosts mmap work.bin.
 #+options: toc:nil num:nil
 
 One writer. Unpacked Cap'n on disk. Hosts mmap =work.bin=.
