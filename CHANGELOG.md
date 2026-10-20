@@ -4,6 +4,12 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 
 ## Unreleased
 
+- claimdag builds on capnp 0.27. capnp 0.20 marks two safe functions
+  unsound (RUSTSEC-2025-0143), and the code generated from the schema
+  calls one of them, so `cargo deny check` failed in every crate that
+  depends on claimdag. The schema is unchanged and so are its type ids
+  and struct layouts. A `work.bin` that 0.7.1 wrote opens, and saving the
+  graph again writes the same bytes. A test reads such a file.
 - Each release archive gets a GitHub build attestation from the release workflow, so `gh attestation verify` and the ljos installer can check that this repository built it. Releases before this one have none, and the installer counts them as not published.
 - The docs no longer say the ledger keeps a reopened node's completion.
   The ledger is in memory only and `work.bin` does not store it, so each
