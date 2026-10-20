@@ -2,7 +2,7 @@
 
 Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 
-## Unreleased
+## 0.8.0 (2026-10-20)
 
 - claimdag builds on capnp 0.27. capnp 0.20 marks two safe functions
   unsound (RUSTSEC-2025-0143), and the code generated from the schema
