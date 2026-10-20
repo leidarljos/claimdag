@@ -1,4 +1,5 @@
-# Licenses this workspace may depend on. CI runs `cargo deny check licenses`.
+# Licenses this workspace may depend on. CI runs `cargo deny check`, so an
+# advisory against a crate in the tree fails it too.
 
 [licenses]
 allow = [
