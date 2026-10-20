@@ -1,0 +1,15 @@
+# Writes fixtures/work-0.7.1.bin with the claimdag 0.7.1 release, so
+# tests/compat_0_7_1.rs reads a file the old crate wrote. It is not a
+# workspace member and nothing builds it in CI. From this directory,
+# `cargo run --locked -- ../work-0.7.1.bin ../work-0.7.1.txt` writes both
+# files.
+[package]
+name = "claimdag-fixture-0-7-1"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+claimdag = "=0.7.1"
+
+[workspace]
