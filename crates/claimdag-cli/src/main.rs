@@ -6,7 +6,12 @@ use claimdag::{WorkFields, WorkGraph, WorkId, WorkKind, WorkNode, WorkRole, Work
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "claimdag", version, about = "CAS claim and complete on a DAG")]
+#[command(
+    name = "claimdag",
+    version,
+    about = "CAS claim and complete on a DAG",
+    after_help = "Exit status is 0 when the verb ran, 1 when it was refused, and 2 when the arguments could not be read. A refusal names the node, who holds it and the unix second that holder was last written when those apply, and the command that resolves it."
+)]
 struct Cli {
     /// Directory that holds work.bin (else CLAIMDAG_DIR, else the runtime dir, else the state dir).
     #[arg(long)]
@@ -180,7 +185,10 @@ enum Cmd {
 }
 
 fn parse_id(s: &str) -> Result<WorkId, String> {
-    WorkId::from_hex(s).ok_or_else(|| format!("bad id {s}"))
+    // WorkId is two u64s printed as hex, 16 characters each. `list --all`
+    // is the inventory of ids that are in the graph.
+    WorkId::from_hex(s)
+        .ok_or_else(|| format!("unknown id {s}: an id is 32 hex characters. claimdag list --all"))
 }
 
 fn print_list_json(nodes: &[&WorkNode]) -> Result<(), String> {
@@ -290,14 +298,6 @@ fn log_forced(
     f.sync_all().map_err(|e| format!("{FORCED_LOG}: {e}"))
 }
 
-/// The refusal for a release or complete with neither `--actor` nor `--force`.
-fn no_actor(verb: &str) -> String {
-    format!(
-        "{verb}: --actor is required: pass the holder's id. --force acts for nobody, \
-         whoever holds the node, and is logged to {FORCED_LOG} in the graph directory"
-    )
-}
-
 /// Whether a verb only reads the graph.
 ///
 /// A writer opening a directory with no graph in it is a cold start and has to
@@ -311,6 +311,9 @@ fn reads_only(cmd: &Cmd) -> bool {
 fn main() {
     if let Err(e) = run() {
         eprintln!("{e}");
+        // Refusals exit 1. Clap exits 2 itself when it cannot read the
+        // arguments, which is clap 4's default for a parse error. `--help`
+        // states both.
         std::process::exit(1);
     }
 }
@@ -357,7 +360,9 @@ fn run() -> Result<(), String> {
         }
         Cmd::Get { id } => {
             let id = parse_id(&id)?;
-            let n = g.get(id).ok_or("not found")?;
+            let n = g
+                .get(id)
+                .ok_or_else(|| format!("get: unknown id {}. claimdag list --all", id.to_hex()))?;
             print_get(n);
         }
         Cmd::Upsert {
@@ -451,7 +456,7 @@ fn run() -> Result<(), String> {
                     g.complete(id, status, &summary, parse_id(&actor)?, gen)?;
                     g.save_dir(&dir)?;
                 }
-                None if !force => return Err(no_actor("complete")),
+                None if !force => return g.complete(id, status, &summary, WorkId::ZERO, gen),
                 _ => {
                     let holder = g.complete_forced(id, status, &summary, gen)?;
                     g.save_dir(&dir)?;
@@ -474,7 +479,7 @@ fn run() -> Result<(), String> {
                     g.save_dir(&dir)?;
                     cas
                 }
-                None if !force => return Err(no_actor("release")),
+                None if !force => return g.release(id, WorkId::ZERO).map(|_| ()),
                 _ => {
                     let (cas, holder) = g.release_forced(id)?;
                     g.save_dir(&dir)?;

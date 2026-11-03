@@ -37,12 +37,32 @@ pub const SNAP_FILE: &str = crate::snap::SNAP_BIN;
 const MAX_WORK_NODES: usize = 4096;
 const MAX_LEDGER: usize = 8192;
 
-/// The refusal for a release that names nobody.
-const NO_ACTOR_RELEASE: &str =
-    "release: no actor; name the holder, or force it (a forced release is logged)";
-/// The refusal for a complete that names nobody.
-const NO_ACTOR_COMPLETE: &str =
-    "complete: no actor; name the holder, or force it (a forced complete is logged)";
+/// An id that is not in the snapshot.
+///
+/// `list --all` is the inventory of ids. The default list hides terminal and
+/// archived nodes, so it cannot answer which ids are there.
+fn unknown_id(verb: &str, id: WorkId) -> String {
+    format!("{verb}: unknown id {}. claimdag list --all", id.to_hex())
+}
+
+/// The actor is not the holder.
+///
+/// `updated_unix` is the lease clock: claim, renew and running all write it,
+/// so it is the second this holder was last recorded. `set_running` has no
+/// command-line verb, so that refusal says who may call it.
+fn not_assignee(verb: &str, node: &WorkNode) -> String {
+    let id = node.id.to_hex();
+    let holder = node.assignee.to_hex();
+    let command = if verb == "running" {
+        format!("pass actor {holder} to set_running")
+    } else {
+        format!("claimdag {verb} {id} --actor {holder}")
+    };
+    format!(
+        "{verb}: not assignee. node {id} is held by {holder} since unix {}. {command}",
+        node.updated_unix
+    )
+}
 
 /// Work node status (CAS claim/complete).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -363,6 +383,87 @@ impl WorkGraph {
         }
     }
 
+    /// A parent edge that would close a cycle, and the command that does not.
+    ///
+    /// A zero parent does not clear a stored one, so the follow-up omits
+    /// `--parent`: that is the write that leaves the chain as it is. Upsert
+    /// also refuses a live claim and a terminal node, because the command
+    /// line sends a status on every upsert, so those name release or reopen.
+    fn parent_cycle(
+        &self,
+        id: WorkId,
+        parent: WorkId,
+        kind: WorkKind,
+        status: WorkStatus,
+    ) -> String {
+        let id_hex = id.to_hex();
+        let parent_hex = parent.to_hex();
+        match self.nodes.get(&id) {
+            Some(node)
+                if matches!(node.status, WorkStatus::Claimed | WorkStatus::Running)
+                    && !node.assignee.is_zero() =>
+            {
+                format!(
+                    "upsert: parent cycle. node {id_hex} is held by {} since unix {} and would have parent {parent_hex}. claimdag release {id_hex} --actor {}",
+                    node.assignee.to_hex(),
+                    node.updated_unix,
+                    node.assignee.to_hex()
+                )
+            }
+            Some(node) if matches!(node.status, WorkStatus::Claimed | WorkStatus::Running) => {
+                format!(
+                    "upsert: parent cycle. node {id_hex} would have parent {parent_hex}. claimdag release {id_hex} --force"
+                )
+            }
+            Some(node) if node.status.is_terminal() => format!(
+                "upsert: parent cycle. node {id_hex} would have parent {parent_hex}. claimdag reopen {id_hex}"
+            ),
+            Some(node) => format!(
+                "upsert: parent cycle. node {id_hex} would have parent {parent_hex}. claimdag upsert --id {id_hex} --kind {} --status {}",
+                node.kind.as_str(),
+                node.status.as_str()
+            ),
+            None => format!(
+                "upsert: parent cycle. node {id_hex} would have parent {parent_hex}. claimdag upsert --id {id_hex} --kind {} --status {}",
+                kind.as_str(),
+                status.as_str()
+            ),
+        }
+    }
+
+    /// A release or complete that names nobody.
+    ///
+    /// The holder, when there is one, is who `--actor` has to name.
+    /// `updated_unix` is the lease clock, so it is the second that holder was
+    /// last recorded. `--force` is the logged way to act for nobody; the
+    /// command line appends that call to `forced.log`.
+    fn no_actor(&self, verb: &str, id: WorkId) -> String {
+        let Some(node) = self.nodes.get(&id) else {
+            return format!(
+                "{verb}: no actor. unknown id {}. claimdag list --all",
+                id.to_hex()
+            );
+        };
+        let id_hex = node.id.to_hex();
+        if !node.assignee.is_zero() {
+            let holder = node.assignee.to_hex();
+            return format!(
+                "{verb}: no actor. node {id_hex} is held by {holder} since unix {}. claimdag {verb} {id_hex} --actor {holder}. claimdag {verb} {id_hex} --force acts for nobody and is logged to forced.log",
+                node.updated_unix
+            );
+        }
+        if verb == "complete" {
+            // Nobody holds it, and it can still be finished. `--force` is the
+            // command that does that without inventing an actor.
+            return format!(
+                "{verb}: no actor. node {id_hex} has no holder. claimdag {verb} {id_hex} --force acts for nobody and is logged to forced.log"
+            );
+        }
+        // Release applies to a live claim. With no holder the status check
+        // refuses the call either way, so the next step is to read the node.
+        format!("{verb}: no actor. node {id_hex} has no holder. claimdag get {id_hex}")
+    }
+
     /// What an upsert is asserting about a node.
     pub fn upsert(&mut self, mut id: WorkId, fields: WorkFields<'_>) -> Result<WorkId, String> {
         let WorkFields {
@@ -379,7 +480,7 @@ impl WorkGraph {
         // The parent chain is a forest: a parent edge is loop-checked as a
         // dependency edge is.
         if !parent.is_zero() && (parent == id || self.parent_reaches(parent, id)) {
-            return Err("upsert: parent cycle".into());
+            return Err(self.parent_cycle(id, parent, kind, status));
         }
         let now = Self::now();
         let entry = self.nodes.entry(id).or_insert_with(|| WorkNode {
@@ -845,10 +946,7 @@ impl WorkGraph {
             return Err("claim: zero assignee".into());
         }
         let deps: Vec<WorkId> = {
-            let node = self
-                .nodes
-                .get(&id)
-                .ok_or_else(|| "claim: not found".to_string())?;
+            let node = self.nodes.get(&id).ok_or_else(|| unknown_id("claim", id))?;
             if let Some(g) = expected_gen {
                 if node.cas_gen != g {
                     return Err("claim: gen mismatch".into());
@@ -992,7 +1090,7 @@ impl WorkGraph {
     /// explicit way to hand back a claim for nobody.
     pub fn release(&mut self, id: WorkId, actor: WorkId) -> Result<u64, String> {
         if actor.is_zero() {
-            return Err(NO_ACTOR_RELEASE.into());
+            return Err(self.no_actor("release", id));
         }
         self.release_as(id, actor, false)
             .map(|(generation, _)| generation)
@@ -1014,12 +1112,12 @@ impl WorkGraph {
         let node = self
             .nodes
             .get_mut(&id)
-            .ok_or_else(|| "release: not found".to_string())?;
+            .ok_or_else(|| unknown_id("release", id))?;
         if !matches!(node.status, WorkStatus::Claimed | WorkStatus::Running) {
             return Err(format!("release: status {}", node.status.as_str()));
         }
         if !forced && !node.assignee.is_zero() && node.assignee != actor {
-            return Err("release: not assignee".into());
+            return Err(not_assignee("release", node));
         }
         let holder = node.assignee;
         node.status = WorkStatus::Ready;
@@ -1040,7 +1138,7 @@ impl WorkGraph {
         let node = self
             .nodes
             .get_mut(&id)
-            .ok_or_else(|| "reopen: not found".to_string())?;
+            .ok_or_else(|| unknown_id("reopen", id))?;
         if !node.status.is_terminal() {
             return Err(format!(
                 "reopen: status {} is not terminal",
@@ -1063,12 +1161,12 @@ impl WorkGraph {
         let node = self
             .nodes
             .get_mut(&id)
-            .ok_or_else(|| "renew: not found".to_string())?;
+            .ok_or_else(|| unknown_id("renew", id))?;
         if !matches!(node.status, WorkStatus::Claimed | WorkStatus::Running) {
             return Err(format!("renew: status {}", node.status.as_str()));
         }
         if !node.assignee.is_zero() && !actor.is_zero() && node.assignee != actor {
-            return Err("renew: not assignee".into());
+            return Err(not_assignee("renew", node));
         }
         node.updated_unix = Self::now();
         Ok(node.cas_gen)
@@ -1078,7 +1176,7 @@ impl WorkGraph {
         let node = self
             .nodes
             .get_mut(&id)
-            .ok_or_else(|| "running: not found".to_string())?;
+            .ok_or_else(|| unknown_id("running", id))?;
         if !matches!(node.status, WorkStatus::Claimed | WorkStatus::Running) {
             return Err(format!("running: status {}", node.status.as_str()));
         }
@@ -1086,7 +1184,7 @@ impl WorkGraph {
         // or the ledger records a stranger as having started somebody's work.
         // A zero actor is the command line's escape, as it is there.
         if !node.assignee.is_zero() && !actor.is_zero() && node.assignee != actor {
-            return Err("running: not assignee".into());
+            return Err(not_assignee("running", node));
         }
         node.status = WorkStatus::Running;
         node.updated_unix = Self::now();
@@ -1108,7 +1206,7 @@ impl WorkGraph {
         expected_gen: Option<u64>,
     ) -> Result<(), String> {
         if actor.is_zero() {
-            return Err(NO_ACTOR_COMPLETE.into());
+            return Err(self.no_actor("complete", id));
         }
         self.complete_as(id, status, summary, actor, expected_gen, false)
             .map(|_| ())
@@ -1146,7 +1244,7 @@ impl WorkGraph {
         let node = self
             .nodes
             .get_mut(&id)
-            .ok_or_else(|| "complete: not found".to_string())?;
+            .ok_or_else(|| unknown_id("complete", id))?;
         if let Some(g) = expected_gen {
             if node.cas_gen != g {
                 return Err("complete: gen mismatch".into());
@@ -1155,7 +1253,7 @@ impl WorkGraph {
         // Whoever held it may still speak for it; checked before the terminal
         // case so a stranger cannot rewrite a finished node.
         if !forced && !node.assignee.is_zero() && node.assignee != actor {
-            return Err("complete: not assignee".into());
+            return Err(not_assignee("complete", node));
         }
         let holder = node.assignee;
         if node.status.is_terminal() {
@@ -1177,7 +1275,7 @@ impl WorkGraph {
         let node = self
             .nodes
             .get_mut(&id)
-            .ok_or_else(|| "complete: not found".to_string())?;
+            .ok_or_else(|| unknown_id("complete", id))?;
         node.status = status;
         if !summary.is_empty() {
             node.summary = summary.to_string();
@@ -1201,7 +1299,7 @@ impl WorkGraph {
         let node = self
             .nodes
             .get_mut(&id)
-            .ok_or_else(|| "archive: not found".to_string())?;
+            .ok_or_else(|| unknown_id("archive", id))?;
         if !node.status.is_terminal() {
             return Err("archive: not terminal".into());
         }
@@ -1222,7 +1320,7 @@ impl WorkGraph {
         let node = self
             .nodes
             .get_mut(&id)
-            .ok_or_else(|| "unarchive: not found".to_string())?;
+            .ok_or_else(|| unknown_id("unarchive", id))?;
         if !node.archived {
             return Ok(());
         }
@@ -1476,7 +1574,13 @@ mod tests {
             .unwrap_err()
             .starts_with("claim: assignee busy"));
         // A stranger cannot hand back somebody else's work.
-        assert_eq!(g.release(a, y).unwrap_err(), "release: not assignee");
+        let refused = g.release(a, y).unwrap_err();
+        assert!(
+            refused.starts_with("release: not assignee")
+                && refused.contains(&a.to_hex())
+                && refused.contains(&x.to_hex()),
+            "{refused}"
+        );
         let generation = g.release(a, x).unwrap();
         let after = g.get(a).unwrap();
         assert_eq!(after.status, WorkStatus::Ready);
