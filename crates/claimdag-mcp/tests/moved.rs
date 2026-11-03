@@ -450,6 +450,16 @@ fn is_stopped(pid: u32) -> bool {
         .starts_with('T')
 }
 
+/// `/tmp` and `/private/tmp` are one directory on macOS, and `lsof` prints
+/// the second. Either path is the open lock.
+fn same_lock(shown: &Path, path: &Path) -> bool {
+    if shown == path {
+        return true;
+    }
+    let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    canon(shown) == canon(path)
+}
+
 /// Whether `pid` has `path` open. The write resolves the directory and then
 /// opens its lock, so an open lock is the resolve having chosen that directory.
 fn has_open(pid: u32, path: &Path) -> bool {
@@ -459,22 +469,25 @@ fn has_open(pid: u32, path: &Path) -> bool {
         let Ok(entries) = std::fs::read_dir(&dir) else {
             return false;
         };
-        entries
-            .flatten()
-            .any(|entry| std::fs::read_link(entry.path()).is_ok_and(|target| target == path))
+        entries.flatten().any(|entry| {
+            std::fs::read_link(entry.path()).is_ok_and(|target| same_lock(&target, path))
+        })
     }
     #[cfg(not(target_os = "linux"))]
     {
         // `lsof -F n` prints one `n<path>` line per open file. macOS has no
-        // `/proc/<pid>/fd`. A missing lsof is a failed observation, not a pass.
+        // `/proc/<pid>/fd`. `-n -P` skips the lookups that make one call
+        // longer than the lock wait. A missing lsof is a failed observation,
+        // not a pass.
         let output = Command::new("lsof")
-            .args(["-p", &pid.to_string(), "-F", "n"])
+            .args(["-n", "-P", "-p", &pid.to_string(), "-F", "n"])
             .output()
             .unwrap_or_else(|err| panic!("lsof {pid}: {err}"));
         let text = String::from_utf8_lossy(&output.stdout);
-        let want = path.to_string_lossy();
-        text.lines()
-            .any(|line| line.strip_prefix('n') == Some(want.as_ref()))
+        text.lines().any(|line| {
+            line.strip_prefix('n')
+                .is_some_and(|shown| same_lock(Path::new(shown), path))
+        })
     }
 }
 
