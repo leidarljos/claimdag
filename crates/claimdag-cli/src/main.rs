@@ -1,5 +1,6 @@
 //! claimdag command line over a directory that holds work.bin.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use claimdag::{WorkFields, WorkGraph, WorkId, WorkKind, WorkNode, WorkRole, WorkStatus};
@@ -294,6 +295,76 @@ fn print_list_line(n: &WorkNode) {
     );
 }
 
+/// Unfinished chain below `id`. A node the depth map skipped has no
+/// unfinished successor, the same depth as a leaf.
+fn chain_below(depth: &HashMap<WorkId, u32>, id: WorkId) -> u32 {
+    depth.get(&id).copied().unwrap_or(0)
+}
+
+/// Ready rows. Each carries the unfinished chain below it, as
+/// `waiting_below` in JSON and `below=N` on a text line, so the order is
+/// visible. `list` keeps its own printer and does not grow this field.
+fn print_ready(
+    nodes: &[&WorkNode],
+    depth: &HashMap<WorkId, u32>,
+    json: bool,
+) -> Result<(), String> {
+    if json {
+        let rows: Vec<serde_json::Value> = nodes
+            .iter()
+            .map(|n| {
+                serde_json::json!({
+                    "id": n.id.to_hex(),
+                    "kind": n.kind.as_str(),
+                    "status": n.status.as_str(),
+                    "role": n.role.as_str(),
+                    "assignee": n.assignee.to_hex(),
+                    "parent": n.parent.to_hex(),
+                    "deps": n.deps.iter().map(|d| d.to_hex()).collect::<Vec<_>>(),
+                    "cas_gen": n.cas_gen,
+                    "created_unix": n.created_unix,
+                    "updated_unix": n.updated_unix,
+                    "finished_unix": n.finished_unix,
+                    "summary": n.summary,
+                    "archived": n.archived,
+                    "waiting_below": chain_below(depth, n.id),
+                })
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::to_string(&rows).map_err(|e| e.to_string())?
+        );
+        return Ok(());
+    }
+    for n in nodes {
+        let flag = if n.archived { "  archived" } else { "" };
+        let who = if n.assignee.is_zero() {
+            String::new()
+        } else {
+            format!("  {}", &n.assignee.to_hex()[..8])
+        };
+        let role = if n.role.as_str() == "unset" {
+            String::new()
+        } else {
+            format!("  {}", n.role.as_str())
+        };
+        println!(
+            "{}  {}  {}{}{}  gen={}  below={}{}  {}",
+            n.id.to_hex(),
+            n.status.as_str(),
+            n.kind.as_str(),
+            who,
+            role,
+            n.cas_gen,
+            chain_below(depth, n.id),
+            flag,
+            n.summary
+        );
+    }
+    Ok(())
+}
+
 fn print_get(n: &WorkNode) {
     let deps = if n.deps.is_empty() {
         "-".to_string()
@@ -513,13 +584,10 @@ fn run() -> Result<(), String> {
             } else {
                 g.ready_view()
             };
-            if json {
-                print_list_json(&nodes)?;
-            } else {
-                for n in nodes {
-                    print_list_line(n);
-                }
-            }
+            // One walk for every row. The view sorts by its own pass over
+            // the same depth; this one is what the seat reads.
+            let depth = g.critical_depth();
+            print_ready(&nodes, &depth, json)?;
         }
         Cmd::ClaimNext {
             assignee,
