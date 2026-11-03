@@ -5,9 +5,9 @@ use std::path::PathBuf;
 
 use claimdag::{Absent, WorkGraph, WorkId, WorkNode, WorkRole, WorkStatus};
 use rmcp::{
-    handler::server::wrapper::Json, handler::server::wrapper::Parameters,
-    handler::server::ServerHandler, model::*, prompt_handler, tool, tool_handler, tool_router,
-    ErrorData as McpError,
+    handler::server::tool::IntoCallToolResult, handler::server::wrapper::Json,
+    handler::server::wrapper::Parameters, handler::server::ServerHandler, model::*, prompt_handler,
+    tool, tool_handler, tool_router, ErrorData as McpError,
 };
 use serde::Serialize;
 
@@ -74,12 +74,44 @@ fn now_unix() -> u64 {
         .unwrap_or(0)
 }
 
-fn parse(raw: &str) -> Result<WorkId, McpError> {
-    WorkId::from_hex(raw).ok_or_else(|| McpError::invalid_params(format!("bad id {raw}"), None))
+/// Why a tool call did not return a row.
+///
+/// A refusal is text the seat has to read, so it is a tool result with
+/// `isError` set. `Err` of [`McpError`] is a JSON-RPC error, and clients
+/// show that as a transport failure, some of them retrying it, so the seat
+/// never reads "claim: status claimed". An id that is not 32 hex characters,
+/// or a status other than done, failed or cancelled, stays invalid params:
+/// the call never reached the graph. rmcp 3.3.0 keeps `Result<Json<T>, _>`
+/// as the output schema and turns an error-side `CallToolResult` into that
+/// tool result, while `Err(ErrorData)` stays a protocol error, so the two
+/// are different variants.
+#[derive(Debug)]
+enum Fail {
+    Refusal(String),
+    Params(McpError),
 }
 
-fn bad(why: String) -> McpError {
-    McpError::internal_error(why, None)
+impl IntoCallToolResult for Fail {
+    fn into_call_tool_result(self) -> Result<CallToolResponse, McpError> {
+        match self {
+            Self::Params(err) => Err(err),
+            Self::Refusal(text) => Ok(CallToolResult::error(vec![ContentBlock::text(text)]).into()),
+        }
+    }
+}
+
+fn parse(raw: &str) -> Result<WorkId, Fail> {
+    WorkId::from_hex(raw).ok_or_else(|| invalid(format!("bad id {raw}")))
+}
+
+/// The graph, the snapshot or the lock said no. The text is what the seat reads.
+fn bad(why: String) -> Fail {
+    Fail::Refusal(why)
+}
+
+/// An id or a status the tool cannot take. The protocol answers invalid params.
+fn invalid(why: String) -> Fail {
+    Fail::Params(McpError::invalid_params(why, None))
 }
 
 #[tool_router]
@@ -104,14 +136,14 @@ impl ClaimdagServer {
     /// Reading verbs refuse an absent graph rather than answering "nothing
     /// claimable", because those are opposite answers: one is a quiet seat and
     /// the other is a caller pointed at the wrong place.
-    fn reading(&self) -> Result<WorkGraph, McpError> {
+    fn reading(&self) -> Result<WorkGraph, Fail> {
         WorkGraph::open_dir(&self.dir).map_err(|absent: Absent| bad(absent.to_string()))
     }
 
     /// The graph a writing verb starts from. The caller holds the lock. A
     /// snapshot that does not parse is refused, never replaced by an empty
     /// graph and saved over.
-    fn writing(&self) -> Result<WorkGraph, McpError> {
+    fn writing(&self) -> Result<WorkGraph, Fail> {
         WorkGraph::load_for_write(&self.dir).map_err(|absent: Absent| bad(absent.to_string()))
     }
 
@@ -123,7 +155,7 @@ impl ClaimdagServer {
             open_world_hint = false
         )
     )]
-    async fn claimdag_ready(&self) -> Result<Json<Vec<NodeRow>>, McpError> {
+    async fn claimdag_ready(&self) -> Result<Json<Vec<NodeRow>>, Fail> {
         let graph = self.reading()?;
         let now = now_unix();
         let depth = graph.critical_depth();
@@ -147,7 +179,7 @@ impl ClaimdagServer {
     async fn claimdag_ready_balanced(
         &self,
         Parameters(args): Parameters<ReadyArgs>,
-    ) -> Result<Json<Vec<NodeRow>>, McpError> {
+    ) -> Result<Json<Vec<NodeRow>>, Fail> {
         let graph = self.reading()?;
         let now = now_unix();
         let depth = graph.critical_depth();
@@ -182,7 +214,7 @@ impl ClaimdagServer {
     async fn claimdag_list(
         &self,
         Parameters(args): Parameters<ListArgs>,
-    ) -> Result<Json<Vec<NodeRow>>, McpError> {
+    ) -> Result<Json<Vec<NodeRow>>, Fail> {
         let graph = self.reading()?;
         let now = now_unix();
         let all = args.all.unwrap_or(false);
@@ -209,7 +241,7 @@ impl ClaimdagServer {
     async fn claimdag_claim(
         &self,
         Parameters(args): Parameters<ClaimArgs>,
-    ) -> Result<Json<ClaimRow>, McpError> {
+    ) -> Result<Json<ClaimRow>, Fail> {
         let id = parse(&args.id)?;
         let assignee = parse(&args.assignee)?;
         let _lock = claimdag::lock_dir(&self.dir).map_err(bad)?;
@@ -235,7 +267,7 @@ impl ClaimdagServer {
     async fn claimdag_claim_next(
         &self,
         Parameters(args): Parameters<ClaimNextArgs>,
-    ) -> Result<Json<ClaimRow>, McpError> {
+    ) -> Result<Json<ClaimRow>, Fail> {
         let assignee = parse(&args.assignee)?;
         let role = WorkRole::from(args.role.unwrap_or(crate::args::Role::Unset));
         let slack = args.slack.unwrap_or(1);
@@ -262,7 +294,7 @@ impl ClaimdagServer {
     async fn claimdag_renew(
         &self,
         Parameters(args): Parameters<ActorArgs>,
-    ) -> Result<Json<ClaimRow>, McpError> {
+    ) -> Result<Json<ClaimRow>, Fail> {
         let id = parse(&args.id)?;
         let actor = parse(&args.actor)?;
         let _lock = claimdag::lock_dir(&self.dir).map_err(bad)?;
@@ -288,7 +320,7 @@ impl ClaimdagServer {
     async fn claimdag_release(
         &self,
         Parameters(args): Parameters<ActorArgs>,
-    ) -> Result<Json<ClaimRow>, McpError> {
+    ) -> Result<Json<ClaimRow>, Fail> {
         let id = parse(&args.id)?;
         let actor = parse(&args.actor)?;
         let _lock = claimdag::lock_dir(&self.dir).map_err(bad)?;
@@ -314,7 +346,7 @@ impl ClaimdagServer {
     async fn claimdag_reopen(
         &self,
         Parameters(args): Parameters<ActorArgs>,
-    ) -> Result<Json<ClaimRow>, McpError> {
+    ) -> Result<Json<ClaimRow>, Fail> {
         let id = parse(&args.id)?;
         let actor = parse(&args.actor)?;
         let _lock = claimdag::lock_dir(&self.dir).map_err(bad)?;
@@ -340,7 +372,7 @@ impl ClaimdagServer {
     async fn claimdag_complete(
         &self,
         Parameters(args): Parameters<CompleteArgs>,
-    ) -> Result<Json<NodeRow>, McpError> {
+    ) -> Result<Json<NodeRow>, Fail> {
         let id = parse(&args.id)?;
         let actor = parse(&args.actor)?;
         let status = match args.status.as_deref().unwrap_or("done") {
@@ -348,10 +380,9 @@ impl ClaimdagServer {
             "failed" => WorkStatus::Failed,
             "cancelled" => WorkStatus::Cancelled,
             other => {
-                return Err(McpError::invalid_params(
-                    format!("status is done, failed or cancelled, not {other}"),
-                    None,
-                ));
+                return Err(invalid(format!(
+                    "status is done, failed or cancelled, not {other}"
+                )));
             }
         };
         let _lock = claimdag::lock_dir(&self.dir).map_err(bad)?;
@@ -390,7 +421,7 @@ impl ClaimdagServer {
     async fn claimdag_reclaim(
         &self,
         Parameters(args): Parameters<ReclaimArgs>,
-    ) -> Result<Json<Vec<String>>, McpError> {
+    ) -> Result<Json<Vec<String>>, Fail> {
         let _lock = claimdag::lock_dir(&self.dir).map_err(bad)?;
         let mut graph = self.writing()?;
         let handed = graph.reclaim(args.lease_seconds);

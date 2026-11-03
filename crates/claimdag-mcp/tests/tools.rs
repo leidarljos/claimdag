@@ -20,10 +20,10 @@ use serde_json::Value;
 /// seconds covers that reply and bounds a hang.
 const REPLY_WAIT: Duration = Duration::from_secs(5);
 
-/// JSON-RPC 2.0 invalid params.
+/// JSON-RPC 2.0 invalid params. An id that is not 32 hex characters, or a
+/// status outside done, failed and cancelled, is this. A graph refusal is
+/// a tool result instead.
 const INVALID_PARAMS: i64 = -32602;
-/// JSON-RPC 2.0 internal error. A handler's `Err` is raised as this.
-const INTERNAL_ERROR: i64 = -32603;
 
 /// A generation no node in the fixture is at. Passing it shows the
 /// generation field was read, because the claim is refused.
@@ -480,6 +480,23 @@ impl Seat {
             Answer::Tool { raw, .. } => panic!("{name} returned a tool result\n{raw}"),
         }
     }
+
+    /// A graph refusal is a tool result the seat reads, not a JSON-RPC error.
+    /// `phrase` is the start of that text.
+    fn refused(&mut self, name: &str, arguments: &str, phrase: &str) {
+        match self.tool(name, arguments) {
+            Answer::Tool {
+                is_error: true,
+                text,
+                raw,
+                ..
+            } => {
+                assert!(text.starts_with(phrase), "{name}: {text}\n{raw}");
+            }
+            Answer::Tool { raw, .. } => panic!("{name} succeeded\n{raw}"),
+            Answer::Rpc { code, message, raw } => panic!("{name} raised {code} {message}\n{raw}"),
+        }
+    }
 }
 
 impl Drop for Seat {
@@ -521,7 +538,7 @@ fn every_tool_returns_an_answer_and_an_error() {
         "no work graph at {}: the directory holds no work.bin. Claim something to create it",
         dir.path().display()
     );
-    seat.rpc_err("claimdag_ready", "{}", INTERNAL_ERROR, &missing);
+    seat.refused("claimdag_ready", "{}", &missing);
     // `work.bin` is the snapshot name the server opens.
     std::fs::write(dir.path().join("work.bin"), THREE_NODES).expect("seed the snapshot");
 
@@ -592,10 +609,16 @@ fn every_tool_returns_an_answer_and_an_error() {
         },
     );
 
+    // An id that is not 32 hex characters never reaches the graph.
     seat.rpc_err(
         "claimdag_claim",
+        &format!(r#"{{"id":"zz","assignee":"{WRITER}"}}"#),
+        INVALID_PARAMS,
+        "bad id zz",
+    );
+    seat.refused(
+        "claimdag_claim",
         &format!(r#"{{"id":"{PARSER}","assignee":"{WRITER}","generation":{STALE_GENERATION}}}"#),
-        INTERNAL_ERROR,
         "claim: gen mismatch",
     );
     let claimed = seat.answer(
@@ -603,6 +626,12 @@ fn every_tool_returns_an_answer_and_an_error() {
         &format!(r#"{{"id":"{PARSER}","assignee":"{WRITER}","generation":1}}"#),
     );
     assert_claim(&claimed, PARSER, 2);
+    // The parser is held. A second claim is a refusal the seat can read.
+    seat.refused(
+        "claimdag_claim",
+        &format!(r#"{{"id":"{PARSER}","assignee":"{READER}"}}"#),
+        "claim:",
+    );
     let ready = seat.rows("claimdag_ready", "{}");
     assert_eq!(ids(&ready), [SPEC]);
 
@@ -613,10 +642,9 @@ fn every_tool_returns_an_answer_and_an_error() {
     );
     assert_claim(&next, SPEC, 2);
 
-    seat.rpc_err(
+    seat.refused(
         "claimdag_renew",
         &format!(r#"{{"id":"{SPEC}","actor":"{WRITER}"}}"#),
-        INTERNAL_ERROR,
         "renew: not assignee",
     );
     let renewed = seat.answer(
@@ -639,10 +667,9 @@ fn every_tool_returns_an_answer_and_an_error() {
         },
     );
 
-    seat.rpc_err(
+    seat.refused(
         "claimdag_release",
         &format!(r#"{{"id":"{PARSER}","actor":"{READER}"}}"#),
-        INTERNAL_ERROR,
         "release: not assignee",
     );
     let released = seat.answer(
@@ -753,10 +780,9 @@ fn every_tool_returns_an_answer_and_an_error() {
         },
     );
 
-    seat.rpc_err(
+    seat.refused(
         "claimdag_reopen",
         &format!(r#"{{"id":"{SPEC}","actor":"{READER}"}}"#),
-        INTERNAL_ERROR,
         "reopen: status ready is not terminal",
     );
     let reopened = seat.answer(
