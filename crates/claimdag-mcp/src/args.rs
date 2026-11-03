@@ -5,8 +5,38 @@
 //! places the command line makes it optional: omitting it is the escape for
 //! speaking about a node nobody holds.
 
+use claimdag::WorkRole;
 use schemars::JsonSchema;
 use serde::Deserialize;
+
+/// A worker role, lowercase, the same words the graph stores.
+///
+/// The tool schema lists these. A word outside the list is refused.
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum Role {
+    Unset,
+    Explore,
+    Architect,
+    Implementor,
+    Verifier,
+    Orchestrator,
+    General,
+}
+
+impl From<Role> for WorkRole {
+    fn from(role: Role) -> Self {
+        match role {
+            Role::Unset => Self::Unset,
+            Role::Explore => Self::Explore,
+            Role::Architect => Self::Architect,
+            Role::Implementor => Self::Implementor,
+            Role::Verifier => Self::Verifier,
+            Role::Orchestrator => Self::Orchestrator,
+            Role::General => Self::General,
+        }
+    }
+}
 
 /// Whether to include finished and archived work.
 #[derive(Deserialize, JsonSchema)]
@@ -19,9 +49,9 @@ pub struct ListArgs {
 /// Querying claimable ready work.
 #[derive(Deserialize, JsonSchema, Default)]
 pub struct ReadyArgs {
-    /// Filter or prioritize by worker role ('explore', 'architect', 'implementor', 'verifier', 'orchestrator', 'general').
+    /// Filter or prioritize by worker role ('unset', 'explore', 'architect', 'implementor', 'verifier', 'orchestrator', 'general').
     #[serde(default)]
-    pub role: Option<String>,
+    pub role: Option<Role>,
     /// Who is asking, for worker-dispersed load balancing (32 hex characters).
     #[serde(default)]
     pub assignee: Option<String>,
@@ -38,9 +68,9 @@ pub struct ReadyArgs {
 pub struct ClaimNextArgs {
     /// Who is taking it, 32 hex characters.
     pub assignee: String,
-    /// Desired role affinity ('explore', 'architect', 'implementor', 'verifier', 'orchestrator', 'general').
+    /// Desired role affinity ('unset', 'explore', 'architect', 'implementor', 'verifier', 'orchestrator', 'general').
     #[serde(default)]
-    pub role: Option<String>,
+    pub role: Option<Role>,
     /// Allowed critical depth slack for candidate dispersion (default 1).
     #[serde(default)]
     pub slack: Option<usize>,

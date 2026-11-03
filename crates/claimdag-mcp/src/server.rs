@@ -151,16 +151,12 @@ impl ClaimdagServer {
         let graph = self.reading()?;
         let now = now_unix();
         let depth = graph.critical_depth();
-        let role = args
-            .role
-            .as_deref()
-            .and_then(WorkRole::parse_str)
-            .unwrap_or(WorkRole::Unset);
-        let assignee = args
-            .assignee
-            .as_deref()
-            .and_then(WorkId::from_hex)
-            .unwrap_or(WorkId::ZERO);
+        let role = WorkRole::from(args.role.unwrap_or(crate::args::Role::Unset));
+        // Omitted is nobody. A string that is not an id is a bad id.
+        let assignee = match args.assignee.as_deref() {
+            Some(raw) => parse(raw)?,
+            None => WorkId::ZERO,
+        };
         let slack = args.slack.unwrap_or(1);
         let nodes = if args.balanced.unwrap_or(true) {
             graph.ready_view_balanced(role, assignee, slack)
@@ -241,11 +237,7 @@ impl ClaimdagServer {
         Parameters(args): Parameters<ClaimNextArgs>,
     ) -> Result<Json<ClaimRow>, McpError> {
         let assignee = parse(&args.assignee)?;
-        let role = args
-            .role
-            .as_deref()
-            .and_then(WorkRole::parse_str)
-            .unwrap_or(WorkRole::Unset);
+        let role = WorkRole::from(args.role.unwrap_or(crate::args::Role::Unset));
         let slack = args.slack.unwrap_or(1);
         let _lock = claimdag::lock_dir(&self.dir).map_err(bad)?;
         let mut graph = self.writing()?;
@@ -643,7 +635,7 @@ mod tests {
         let me_imp = WorkId { hi: 42, lo: 42 }.to_hex();
         let ready = server
             .claimdag_ready_balanced(Parameters(ReadyArgs {
-                role: Some("implementor".into()),
+                role: Some(crate::args::Role::Implementor),
                 assignee: Some(me_imp.clone()),
                 balanced: Some(true),
                 slack: Some(1),
@@ -655,7 +647,7 @@ mod tests {
         let claimed = server
             .claimdag_claim_next(Parameters(ClaimNextArgs {
                 assignee: me_imp,
-                role: Some("implementor".into()),
+                role: Some(crate::args::Role::Implementor),
                 slack: Some(1),
             }))
             .await
