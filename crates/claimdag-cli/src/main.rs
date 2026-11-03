@@ -182,6 +182,15 @@ enum Cmd {
         #[arg(long, default_value = "00000000000000000000000000000000")]
         actor: String,
     },
+    /// Print every location the graph can be in, in the order they are tried:
+    /// the directory, whether it is in use, holds work or has no graph, and
+    /// the rule that names it.
+    Where {
+        /// Move the graph in use into the first default location, when the
+        /// defaults picked a later one because only it held a graph.
+        #[arg(long = "move")]
+        move_graph: bool,
+    },
 }
 
 fn parse_id(s: &str) -> Result<WorkId, String> {
@@ -328,8 +337,26 @@ fn main() {
     }
 }
 
+/// `where`, after the move when one was asked for and there was a graph to
+/// move. It opens no graph, so it answers on a seat that has none.
+fn where_is(dir: Option<PathBuf>, move_graph: bool) -> Result<(), String> {
+    let located = claimdag::locate(dir.clone());
+    if move_graph {
+        if let Some((from, to)) = located.move_graph()? {
+            println!("moved {} to {}", from.display(), to.display());
+            print!("{}", claimdag::locate(dir));
+            return Ok(());
+        }
+    }
+    print!("{located}");
+    Ok(())
+}
+
 fn run() -> Result<(), String> {
     let cli = Cli::parse();
+    if let Cmd::Where { move_graph } = cli.cmd {
+        return where_is(cli.dir, move_graph);
+    }
     let dir = claimdag::resolve_dir(cli.dir.clone());
     // A verb that only reads says when there is no graph to read. An empty
     // list and a seat pointed at nothing look the same to a caller, and they
@@ -557,6 +584,7 @@ fn run() -> Result<(), String> {
             g.save_dir(&dir)?;
             println!("{}  live", id.to_hex());
         }
+        Cmd::Where { .. } => unreachable!("where is answered before the graph is opened"),
     }
     Ok(())
 }

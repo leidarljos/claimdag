@@ -15,7 +15,7 @@ pub use graph::{
     WorkRole, WorkStatus, SNAP_FILE,
 };
 pub use id::{mint_work_id, WorkId};
-pub use seat::resolve_dir;
+pub use seat::{locate, resolve_dir, Located};
 pub use snap::SNAP_BIN;
 
 pub mod lock;

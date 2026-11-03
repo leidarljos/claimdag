@@ -5,14 +5,46 @@
 * Point at a graph
 
 =--dir DIR=, else =CLAIMDAG_DIR=, else =$XDG_RUNTIME_DIR/claimdag=. With no
-runtime directory it is =$XDG_STATE_HOME/claimdag=, else
-=~/.local/state/claimdag=, else =/tmp/claimdag-UID=. Each default belongs to
-one user: claimdag makes it with mode 0700 and refuses it when another
-user owns it. A directory named by =CLAIMDAG_DIR= or =--dir= is used as
-given, so a team can share one on purpose. The
-working directory is never used, so a worker in the wrong directory does
-not invent a second graph. A reader that finds no graph says so rather than
-answering "nothing claimable".
+runtime directory the defaults decide, tried in this order:
+=$XDG_STATE_HOME/claimdag=, =~/.local/state/claimdag=, =/tmp/claimdag-UID=,
+and =/tmp/claimdag=, the old default. The first that holds a graph is used,
+else the first that applies, so a seat with no =HOME=, or with an
+=XDG_STATE_HOME= the other seats lack, still reads the graph they started.
+Each default belongs to one user: claimdag makes it with mode 0700, refuses
+it when another user owns it, and passes over a graph in another user's
+directory. A directory named by =CLAIMDAG_DIR= or =--dir= is used as given, so a
+team can share one on purpose. The working directory is never used, so a
+worker in the wrong directory does not invent a second graph. A reader that
+finds no graph says so rather than answering "nothing claimable".
+
+=claimdag where= prints each location in that order, whether it is in use,
+holds work or has no graph, and the rule that names it. =--move= moves the
+graph in use, with =forced.log= and =handles.json=, into the first default:
+
+#+begin_src console
+$ claimdag where
+/home/me/.local/state/claimdag  no graph  HOME
+/tmp/claimdag-1000  no graph  uid
+/tmp/claimdag  in use  old default
+claimdag where --move moves the graph in use to /home/me/.local/state/claimdag
+$ claimdag where --move
+moved /tmp/claimdag to /home/me/.local/state/claimdag
+/home/me/.local/state/claimdag  in use  HOME
+/tmp/claimdag-1000  no graph  uid
+#+end_src
+
+When another location also holds a graph, the command line, the pane and
+the server say on stderr which one they use and which others hold work.
+They say it once, and again when the list changes. A directory named by
+=CLAIMDAG_DIR= or =--dir= gets no such line.
+
+#+begin_src console
+claimdag: using /home/me/.local/state/claimdag; also holding work: /tmp/claimdag. claimdag where lists them
+#+end_src
+
+A seat inside a login session uses the runtime directory, and one outside
+it (cron, =su=, a container) uses the defaults. To give both one graph, set
+the same =CLAIMDAG_DIR= in each.
 
 * Pick the next node
 

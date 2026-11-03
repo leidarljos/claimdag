@@ -59,6 +59,7 @@ Commands:
   unlink      Drop a boolean hard dependency. Missing edge is ok
   archive     Soft-hide a terminal node. Not a delete
   unarchive   Clear the archive flag. Status stays terminal
+  where       Print every location the graph can be in, in the order they are tried: the directory, whether it is in use, holds work or has no graph, and the rule that names it
   help        Print this message or the help of the given subcommand(s)
 
 Options:
@@ -285,6 +286,15 @@ Arguments:
 Options:
       --actor <ACTOR>  [default: 00000000000000000000000000000000]
   -h, --help           Print help
+
+$ claimdag where --help
+Print every location the graph can be in, in the order they are tried: the directory, whether it is in use, holds work or has no graph, and the rule that names it
+
+Usage: claimdag where [OPTIONS]
+
+Options:
+      --move  Move the graph in use into the first default location, when the defaults picked a later one because only it held a graph
+  -h, --help  Print help
 #+end_example
 # [[[end]]]
 
