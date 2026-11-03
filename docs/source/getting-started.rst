@@ -32,7 +32,7 @@ Actors are ids too. A stable identity is any 32-hex string you keep.
    $ claimdag claim $a --assignee $me
    gen=2
    $ claimdag claim $a --assignee $you
-   claim: status claimed
+   claim: status claimed. node 092dca29... is held by 00000000000000000000000000000007 since unix .... claimdag release 092dca29... --actor 00000000000000000000000000000007
 
 The generation moved from 1 to 2 on the claim. That number is the token
 everything after carries.

@@ -89,6 +89,154 @@ fn not_assignee(verb: &str, node: &WorkNode) -> String {
     )
 }
 
+/// A claim of a node that is already claimed or running.
+///
+/// `updated_unix` is the lease clock, the second this holder was last
+/// recorded. Release hands the claim back. With no holder, `--force` is the
+/// logged way, as it is on release itself.
+fn claim_held(node: &WorkNode) -> String {
+    let id = node.id.to_hex();
+    let status = node.status.as_str();
+    if node.assignee.is_zero() {
+        return format!(
+            "claim: status {status}. node {id} has no holder. claimdag release {id} --force"
+        );
+    }
+    let holder = node.assignee.to_hex();
+    format!(
+        "claim: status {status}. node {id} is held by {holder} since unix {}. claimdag release {id} --actor {holder}",
+        node.updated_unix
+    )
+}
+
+/// The generation the caller sent is not the one stored.
+///
+/// That stored generation is the fencing token a later claim has to repeat.
+fn claim_gen_mismatch(node: &WorkNode) -> String {
+    format!(
+        "claim: gen mismatch. node {} is generation {}",
+        node.id.to_hex(),
+        node.cas_gen
+    )
+}
+
+/// This assignee already holds a live claim, and one is the limit.
+///
+/// Each held id has to be released or completed before another claim. The
+/// ids are sorted so the line does not depend on map order.
+fn assignee_busy(assignee: WorkId, mut held: Vec<WorkId>) -> String {
+    held.sort();
+    let who = assignee.to_hex();
+    let listed = held
+        .iter()
+        .map(|id| id.to_hex())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let commands = held
+        .iter()
+        .map(|id| {
+            let hex = id.to_hex();
+            format!("claimdag release {hex} --actor {who} or claimdag complete {hex} --actor {who}")
+        })
+        .collect::<Vec<_>>()
+        .join(". ");
+    format!("claim: assignee busy {listed}. {commands}")
+}
+
+/// Upsert does not reopen a finished node. `reopen` does.
+fn upsert_terminal(node: &WorkNode) -> String {
+    let id = node.id.to_hex();
+    format!(
+        "upsert: node is terminal. node {id} is {}. claimdag reopen {id}",
+        node.status.as_str()
+    )
+}
+
+/// The command that ends a live claim: complete it, or hand it back.
+///
+/// `completeWork` is not a command. With no holder, `--force` is the logged
+/// way to act for nobody.
+fn release_or_complete(node: &WorkNode) -> String {
+    let id = node.id.to_hex();
+    if node.assignee.is_zero() {
+        return format!("claimdag complete {id} --force or claimdag release {id} --force");
+    }
+    let holder = node.assignee.to_hex();
+    format!("claimdag complete {id} --actor {holder} or claimdag release {id} --actor {holder}")
+}
+
+/// Upsert does not end a live claim. Complete and release do.
+fn upsert_claimed(node: &WorkNode) -> String {
+    let id = node.id.to_hex();
+    let next = release_or_complete(node);
+    if node.assignee.is_zero() {
+        return format!(
+            "upsert: node is claimed. node {id} is {}. {next}",
+            node.status.as_str()
+        );
+    }
+    let holder = node.assignee.to_hex();
+    format!(
+        "upsert: node is claimed. node {id} is held by {holder} since unix {}. {next}",
+        node.updated_unix
+    )
+}
+
+/// Claim, complete and release own claimed, running and terminal.
+///
+/// Upsert does not, and there is no `claimWork` or `completeWork` command.
+/// A live node is already held, so the way off it is complete or release.
+fn upsert_lifecycle(node: &WorkNode, asked: WorkStatus) -> String {
+    let id = node.id.to_hex();
+    let command = if matches!(node.status, WorkStatus::Claimed | WorkStatus::Running) {
+        release_or_complete(node)
+    } else {
+        match asked {
+            WorkStatus::Claimed | WorkStatus::Running => {
+                format!("claimdag claim {id} --assignee")
+            }
+            WorkStatus::Done | WorkStatus::Failed | WorkStatus::Cancelled => {
+                format!("claimdag complete {id} --status {}", asked.as_str())
+            }
+            WorkStatus::Todo | WorkStatus::Ready | WorkStatus::Blocked => {
+                format!("claimdag claim {id} --assignee or claimdag complete {id}")
+            }
+        }
+    };
+    format!("upsert: status claim/run/terminal requires {command}")
+}
+
+/// An endpoint of a dependency edge is not in the graph.
+///
+/// `list --all` is the inventory of ids. The default list hides terminal
+/// and archived nodes, so it cannot answer which id is missing.
+fn missing_endpoint(verb: &str, role: &str, id: WorkId) -> String {
+    format!(
+        "{verb}: {role} missing. unknown id {}. claimdag list --all",
+        id.to_hex()
+    )
+}
+
+/// Archive applies to a finished node.
+///
+/// The id and its status are what `get` would have said. `list --all` is
+/// the inventory when this was the wrong id. Complete is what makes the
+/// node archivable.
+fn archive_not_terminal(node: &WorkNode) -> String {
+    let id = node.id.to_hex();
+    let status = node.status.as_str();
+    if node.assignee.is_zero() {
+        return format!(
+            "archive: not terminal. node {id} is {status}. claimdag complete {id} --force. claimdag list --all"
+        );
+    }
+    let holder = node.assignee.to_hex();
+    format!(
+        "archive: not terminal. node {id} is {status} and held by {holder} since unix {}. claimdag complete {id} --actor {holder}. claimdag list --all",
+        node.updated_unix
+    )
+}
+
 /// Work node status (CAS claim/complete).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkStatus {
@@ -560,14 +708,14 @@ impl WorkGraph {
         });
         if entry.status.is_terminal() {
             // Sticky terminal: reject reopen/status forge (client sees error).
-            return Err("upsert: node is terminal".into());
+            return Err(upsert_terminal(entry));
         }
         // A live claim is claim's to end, not upsert's. Demoting a Claimed node
         // to Todo leaves the assignee in place and lets a second agent claim
         // work the first is holding, with neither claim ever failing.
         let live = matches!(entry.status, WorkStatus::Claimed | WorkStatus::Running);
         if live && status != entry.status {
-            return Err("upsert: node is claimed; use completeWork".into());
+            return Err(upsert_claimed(entry));
         }
         // Lifecycle authority: claim/complete own moves into Claimed, Running
         // or a terminal status. Upsert writes metadata, and Todo, Ready or
@@ -586,9 +734,7 @@ impl WorkGraph {
             | WorkStatus::Done
             | WorkStatus::Failed
             | WorkStatus::Cancelled => {
-                return Err(
-                    "upsert: status claim/run/terminal requires claimWork or completeWork".into(),
-                );
+                return Err(upsert_lifecycle(entry, status));
             }
         }
         if kind != WorkKind::Unset {
@@ -620,10 +766,10 @@ impl WorkGraph {
             return Err("link: self-dep".into());
         }
         if !self.nodes.contains_key(&parent) {
-            return Err("link: parent missing".into());
+            return Err(missing_endpoint("link", "parent", parent));
         }
         if !self.nodes.contains_key(&child) {
-            return Err("link: child missing".into());
+            return Err(missing_endpoint("link", "child", child));
         }
         if self.would_cycle(parent, child) {
             return Err("link: would create cycle".into());
@@ -651,7 +797,7 @@ impl WorkGraph {
         let node = self
             .nodes
             .get_mut(&child)
-            .ok_or_else(|| "unlink: child missing".to_string())?;
+            .ok_or_else(|| missing_endpoint("unlink", "child", child))?;
         let before = node.deps.len();
         node.deps.retain(|d| *d != parent);
         if node.deps.len() != before {
@@ -1019,26 +1165,26 @@ impl WorkGraph {
             let node = self.nodes.get(&id).ok_or_else(|| unknown_id("claim", id))?;
             if let Some(g) = expected_gen {
                 if node.cas_gen != g {
-                    return Err("claim: gen mismatch".into());
+                    return Err(claim_gen_mismatch(node));
                 }
+            }
+            if matches!(node.status, WorkStatus::Claimed | WorkStatus::Running) {
+                return Err(claim_held(node));
             }
             if !matches!(node.status, WorkStatus::Ready | WorkStatus::Todo) {
                 return Err(format!("claim: status {}", node.status.as_str()));
             }
             node.deps.clone()
         };
-        let deps_satisfied = deps.iter().all(|d| {
-            self.nodes
-                .get(d)
-                .map(|p| p.status == WorkStatus::Done)
-                .unwrap_or(false)
-        });
-        if !deps_satisfied {
-            return Err("claim: deps unsatisfied".into());
+        // The same predicate as `deps_satisfied`: done counts, anything else,
+        // including a dependency no longer in the graph, does not.
+        let open = self.unfinished_deps(&deps);
+        if !open.is_empty() {
+            return Err(format!("claim: deps unsatisfied {}", open.join(" ")));
         }
         // Occupancy is a graph predicate: one Claimed|Running node per assignee.
         // Same mutex as the gen bump (caller holds work.lock()). Skip `id`.
-        let mut busy: Vec<WorkId> = self
+        let busy: Vec<WorkId> = self
             .nodes
             .values()
             .filter(|n| {
@@ -1049,13 +1195,7 @@ impl WorkGraph {
             .map(|n| n.id)
             .collect();
         if !busy.is_empty() {
-            busy.sort();
-            let listed = busy
-                .iter()
-                .map(|held| held.to_hex())
-                .collect::<Vec<_>>()
-                .join(" ");
-            return Err(format!("claim: assignee busy {listed}"));
+            return Err(assignee_busy(assignee, busy));
         }
         let now = Self::now();
         let node = self.nodes.get_mut(&id).unwrap();
@@ -1085,7 +1225,7 @@ impl WorkGraph {
         }
 
         // Occupancy guard: one live claim per assignee
-        let mut busy: Vec<WorkId> = self
+        let busy: Vec<WorkId> = self
             .nodes
             .values()
             .filter(|n| {
@@ -1095,13 +1235,7 @@ impl WorkGraph {
             .map(|n| n.id)
             .collect();
         if !busy.is_empty() {
-            busy.sort();
-            let listed = busy
-                .iter()
-                .map(|held| held.to_hex())
-                .collect::<Vec<_>>()
-                .join(" ");
-            return Err(format!("claim: assignee busy {listed}"));
+            return Err(assignee_busy(assignee, busy));
         }
 
         let winner_id = {
@@ -1386,7 +1520,7 @@ impl WorkGraph {
             .get_mut(&id)
             .ok_or_else(|| unknown_id("archive", id))?;
         if !node.status.is_terminal() {
-            return Err("archive: not terminal".into());
+            return Err(archive_not_terminal(node));
         }
         if node.archived {
             return Ok(());
@@ -1599,15 +1733,26 @@ mod tests {
         assert_eq!(g.get(b).unwrap().cas_gen, 1);
         assert_eq!(
             g.claim(b, id(10), Some(99)).unwrap_err(),
-            "claim: gen mismatch"
+            format!("claim: gen mismatch. node {} is generation 1", b.to_hex())
         );
         let cas_gen = g.claim(b, id(10), None).unwrap();
         assert_eq!(
             g.claim(b, id(11), Some(1)).unwrap_err(),
-            "claim: gen mismatch"
+            format!("claim: gen mismatch. node {} is generation 2", b.to_hex())
         );
         assert!(g.claim(b, id(11), Some(cas_gen)).is_err());
         g.set_running(b, id(10)).unwrap();
+        let since = g.get(b).unwrap().updated_unix;
+        assert_eq!(
+            g.claim(b, id(11), None).unwrap_err(),
+            format!(
+                "claim: status running. node {} is held by {} since unix {since}. claimdag release {} --actor {}",
+                b.to_hex(),
+                id(10).to_hex(),
+                b.to_hex(),
+                id(10).to_hex()
+            )
+        );
         g.complete(b, WorkStatus::Done, "done", id(10), None)
             .unwrap();
         assert!(g.verify().is_ok());
@@ -2006,7 +2151,14 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(g.archive(a, id(9)).unwrap_err(), "archive: not terminal");
+        assert_eq!(
+            g.archive(a, id(9)).unwrap_err(),
+            format!(
+                "archive: not terminal. node {} is ready. claimdag complete {} --force. claimdag list --all",
+                a.to_hex(),
+                a.to_hex()
+            )
+        );
         g.complete(a, WorkStatus::Done, "done", id(9), None)
             .unwrap();
         assert_eq!(g.list_view(false, false).len(), 0);
@@ -2175,7 +2327,14 @@ mod tests {
                 },
             )
             .unwrap_err();
-        assert_eq!(err, "upsert: node is terminal");
+        assert_eq!(
+            err,
+            format!(
+                "upsert: node is terminal. node {} is done. claimdag reopen {}",
+                a.to_hex(),
+                a.to_hex()
+            )
+        );
         let after_upsert = g.get(a).unwrap();
         assert_eq!(after_upsert.status, WorkStatus::Done);
         assert_eq!(after_upsert.summary, "done");
@@ -2203,7 +2362,11 @@ mod tests {
                 },
             )
             .unwrap_err(),
-            "upsert: node is terminal"
+            format!(
+                "upsert: node is terminal. node {} is cancelled. claimdag reopen {}",
+                b.to_hex(),
+                b.to_hex()
+            )
         );
         assert_eq!(g.get(b).unwrap().status, WorkStatus::Cancelled);
         assert_eq!(

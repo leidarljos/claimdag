@@ -8,8 +8,10 @@ about the command.
 
 Ids are minted with the clock in the salt, so the tutorials abbreviate one
 as eight hex digits and an ellipsis. That token stands for the 32 hex
-characters the program prints. The rest of the line is literal, including
-the two spaces the list printer puts between fields.
+characters the program prints. A refusal names the unix second the holder
+was last written, and that second moves with the clock, so the page writes
+`since unix ...` for those digits. The rest of the line is literal,
+including the two spaces the list printer puts between fields.
 """
 
 from __future__ import annotations
@@ -37,15 +39,22 @@ DOC_DIRS = ("/tmp/demo-claims", "/var/lib/seat")
 # 32, which is the width of a WorkId. A shorter or longer abbreviation is
 # not what the pages do, so it stays literal and the comparison fails.
 _ID_TOKEN = re.compile(r"[0-9a-f]{8}\.\.\.")
+# Three dots after `since unix` stand for the digits of that second. A
+# shorter or longer ellipsis stays literal, as a short id abbreviation does.
+_UNIX_TOKEN = re.compile(r"since unix \.\.\.")
+_WILDCARD = re.compile(rf"{_ID_TOKEN.pattern}|{_UNIX_TOKEN.pattern}")
 _PLACEHOLDER = re.compile(r"<[a-z]+>")
 
 
 def line_regex(expected: str) -> re.Pattern[str]:
     pieces: list[str] = []
     last = 0
-    for match in _ID_TOKEN.finditer(expected):
+    for match in _WILDCARD.finditer(expected):
         pieces.append(re.escape(expected[last : match.start()]))
-        pieces.append(r"[0-9a-f]{32}")
+        if match.group(0).startswith("since unix"):
+            pieces.append(r"since unix [0-9]+")
+        else:
+            pieces.append(r"[0-9a-f]{32}")
         last = match.end()
     pieces.append(re.escape(expected[last:]))
     return re.compile("".join(pieces))
@@ -60,6 +69,23 @@ def check_abbreviation_rule() -> None:
     bad = "829a60c1cc05f1121d0d5eb488cfd43a  todo   task  gen=1  x"
     if pattern.fullmatch(good) is None or pattern.fullmatch(bad) is not None:
         raise SystemExit("run-doc-examples: id abbreviation rule is wrong")
+    refusal = (
+        "claim: status claimed. node 092dca29... is held by "
+        "00000000000000000000000000000007 since unix .... "
+        "claimdag release 092dca29... --actor 00000000000000000000000000000007"
+    )
+    printed = (
+        "claim: status claimed. node 02745e23a376c46bd2602cc07857f2da is held by "
+        "00000000000000000000000000000007 since unix 1793699591. "
+        "claimdag release 02745e23a376c46bd2602cc07857f2da --actor "
+        "00000000000000000000000000000007"
+    )
+    refusal_pattern = line_regex(refusal)
+    if refusal_pattern.fullmatch(printed) is None:
+        raise SystemExit("run-doc-examples: unix abbreviation rule is wrong")
+    # The second is digits. A blank where they go is not that second.
+    if refusal_pattern.fullmatch(printed.replace("unix 1793699591", "unix ")) is not None:
+        raise SystemExit("run-doc-examples: unix abbreviation rule is wrong")
 
 
 def console_blocks(path: pathlib.Path) -> list[list[str]]:
