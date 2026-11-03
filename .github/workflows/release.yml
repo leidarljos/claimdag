@@ -27,8 +27,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
         with:
+          # The toolchain the check workflow builds and tests with.
+          toolchain: 1.97.1
           targets: ${{ matrix.target }}
       - run: cargo build --locked --release --target ${{ matrix.target }} -p claimdag-cli -p claimdag-mcp -p claimdag-tui
       - run: |
