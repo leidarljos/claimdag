@@ -185,11 +185,12 @@ impl ClaimdagServer {
     ///
     /// `locate` stats at most five paths. On `claimdag_ready` with the graph
     /// in `/tmp/claimdag-UID` and the home state directory empty, 21 calls
-    /// an arm interleaved across six rounds (126 calls), the cached median
-    /// was 105 µs (IQR 16) and resolving each call was 111 µs (IQR 20). The
-    /// difference is under a millisecond and inside that spread, so an
-    /// unnamed call resolves every time. Intel Xeon (family 6, model 207),
-    /// 8 cores, one thread per core, Linux 6.12, release.
+    /// an arm across six rounds (126 an arm), a cached directory took a
+    /// median of 12 µs (IQR 0 µs) and resolving each call took 15 µs
+    /// (IQR 0 µs). The calls are `measurements/j78q/ready.tsv`. Resolving
+    /// adds 3 µs, under a millisecond, so an unnamed call resolves every
+    /// time. Intel Xeon (family 6, model 207), 8 cores, one thread per
+    /// core, Linux 6.12, release.
     fn dir(&self) -> PathBuf {
         if let Some(dir) = &self.dir {
             return dir.clone();
@@ -711,6 +712,8 @@ impl ServerHandler for ClaimdagServer {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
     use claimdag::{WorkFields, WorkKind, WorkRole};
 
@@ -943,5 +946,260 @@ mod tests {
             .expect("claim next");
         assert_eq!(claimed.0.id, node2.to_hex());
         assert_eq!(claimed.0.generation, 2);
+    }
+
+    /// Calls on one arm in one round.
+    ///
+    /// Odd, so the median of a round is one of the calls rather than the
+    /// mean of two. This is the sample the `dir` comment reports.
+    const CALLS_AN_ARM: usize = 21;
+
+    /// Rounds, alternating which arm goes first.
+    ///
+    /// One round can be slowed by something else on the machine. Six puts
+    /// that round among the 126 calls of an arm, so it cannot by itself be
+    /// the median. This is the sample the `dir` comment reports.
+    const ROUNDS: usize = 6;
+
+    /// The per-call times behind the `dir` comment.
+    ///
+    /// Parks `/tmp/claimdag-UID`, so it is not part of the suite. Run it on
+    /// its own, in release: `cargo +1.97.1 test --release -p claimdag-mcp
+    /// --bin claimdag-mcp ready_locate_timings -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "writes measurements/j78q/ready.tsv and parks /tmp/claimdag-UID"]
+    fn ready_locate_timings() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        runtime.block_on(ready_locate_timings_run());
+    }
+
+    async fn ready_locate_timings_run() {
+        let parked = park_uid_dir();
+        let root = tempfile::tempdir().expect("private home");
+        let home = root.path().join("home");
+        std::fs::create_dir_all(&home).expect("home");
+        let _env = seat_env(&home);
+        let uid = parked.path.clone();
+        let _seed = work(&uid, "ready timing");
+
+        std::env::set_var("CLAIMDAG_DIR", &uid);
+        let cached = ClaimdagServer::from_env();
+        std::env::remove_var("CLAIMDAG_DIR");
+        let resolving = ClaimdagServer::from_env();
+
+        let mut rows: Vec<(usize, &'static str, usize, u128)> = Vec::new();
+        for round in 1..=ROUNDS {
+            // Odd rounds start on the cached arm, even rounds on resolving,
+            // and the two arms alternate within the round.
+            let cached_first = round % 2 == 1;
+            for call in 1..=CALLS_AN_ARM {
+                let arms = if cached_first {
+                    ["cached", "resolving"]
+                } else {
+                    ["resolving", "cached"]
+                };
+                for arm in arms {
+                    let server = if arm == "cached" { &cached } else { &resolving };
+                    let started = std::time::Instant::now();
+                    server.claimdag_ready().await.expect("ready");
+                    rows.push((round, arm, call, started.elapsed().as_micros()));
+                }
+            }
+        }
+
+        let path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../measurements/j78q/ready.tsv");
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("measurements dir");
+        let mut out = String::new();
+        out.push_str(&format!("# host: {}\n", shell(&["hostname"])));
+        out.push_str(&format!("# cpu: {}\n", cpu_line()));
+        out.push_str(&format!(
+            "# commit: {}\n",
+            shell(&["git", "-C", env!("CARGO_MANIFEST_DIR"), "rev-parse", "HEAD"])
+        ));
+        out.push_str(
+            "# command: cargo +1.97.1 test --release -p claimdag-mcp --bin claimdag-mcp ready_locate_timings -- --ignored --nocapture\n",
+        );
+        out.push_str(&format!("# date: {}\n", shell(&["date", "-Iseconds"])));
+        out.push_str(
+            "# round order: odd rounds start with cached and alternate each call; even rounds start with resolving. 21 calls an arm, 6 rounds, 126 calls an arm.\n",
+        );
+        out.push_str("# column us: microseconds for one claimdag_ready call, release build\n");
+        out.push_str(
+            "# quartile: an even count splits in half, and each hinge is the median of that half. 126 splits into two halves of 63.\n",
+        );
+        out.push_str("round\tarm\tcall\tus\n");
+        for (round, arm, call, us) in &rows {
+            out.push_str(&format!("{round}\t{arm}\t{call}\t{us}\n"));
+        }
+        std::fs::write(&path, out).unwrap_or_else(|err| panic!("write {}: {err}", path.display()));
+
+        for arm in ["cached", "resolving"] {
+            let mut samples: Vec<u128> = rows
+                .iter()
+                .filter(|row| row.1 == arm)
+                .map(|row| row.3)
+                .collect();
+            let (median, iqr) = median_and_iqr(&mut samples);
+            eprintln!(
+                "{arm} median {median} µs  IQR {iqr} µs  n {}",
+                samples.len()
+            );
+        }
+        eprintln!("wrote {}", path.display());
+    }
+
+    /// Move `/tmp/claimdag-UID` aside for the run and put it back after.
+    fn park_uid_dir() -> ParkedUid {
+        let path = PathBuf::from(format!("/tmp/claimdag-{}", uid_number()));
+        let backup = if path.exists() {
+            let backup = std::env::temp_dir().join(format!(
+                "claimdag-uid-park-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0)
+            ));
+            std::fs::rename(&path, &backup)
+                .unwrap_or_else(|err| panic!("park {}: {err}", path.display()));
+            Some(backup)
+        } else {
+            None
+        };
+        ParkedUid { path, backup }
+    }
+
+    fn uid_number() -> u32 {
+        let out = std::process::Command::new("id")
+            .arg("-u")
+            .output()
+            .expect("id -u");
+        String::from_utf8(out.stdout)
+            .expect("uid")
+            .trim()
+            .parse()
+            .expect("uid number")
+    }
+
+    struct ParkedUid {
+        path: PathBuf,
+        backup: Option<PathBuf>,
+    }
+
+    impl Drop for ParkedUid {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+            let _ = std::fs::remove_file(&self.path);
+            if let Some(backup) = &self.backup {
+                if let Err(err) = std::fs::rename(backup, &self.path) {
+                    eprintln!(
+                        "could not restore {} from {}: {err}",
+                        self.path.display(),
+                        backup.display()
+                    );
+                }
+            }
+        }
+    }
+
+    struct SeatEnv {
+        keys: [&'static str; 4],
+        saved: Vec<Option<std::ffi::OsString>>,
+    }
+
+    impl SeatEnv {
+        fn keys() -> [&'static str; 4] {
+            ["HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR", "CLAIMDAG_DIR"]
+        }
+    }
+
+    fn seat_env(home: &std::path::Path) -> SeatEnv {
+        let keys = SeatEnv::keys();
+        let saved = keys.iter().map(std::env::var_os).collect();
+        std::env::set_var("HOME", home);
+        std::env::remove_var("XDG_STATE_HOME");
+        std::env::remove_var("XDG_RUNTIME_DIR");
+        std::env::remove_var("CLAIMDAG_DIR");
+        SeatEnv { keys, saved }
+    }
+
+    impl Drop for SeatEnv {
+        fn drop(&mut self) {
+            for (key, value) in self.keys.iter().zip(self.saved.drain(..)) {
+                match value {
+                    Some(value) => std::env::set_var(key, value),
+                    None => std::env::remove_var(key),
+                }
+            }
+        }
+    }
+
+    fn shell(args: &[&str]) -> String {
+        let output = std::process::Command::new(args[0])
+            .args(&args[1..])
+            .output()
+            .unwrap_or_else(|err| panic!("{}: {err}", args[0]));
+        String::from_utf8(output.stdout)
+            .unwrap_or_else(|err| panic!("{}: {err}", args[0]))
+            .trim()
+            .to_string()
+    }
+
+    /// One line: family, model, stepping, cores and threads. CPU only.
+    fn cpu_line() -> String {
+        let text = std::fs::read_to_string("/proc/cpuinfo").expect("cpuinfo");
+        let take = |key: &str| {
+            text.lines()
+                .find_map(|line| {
+                    let (k, v) = line.split_once(':')?;
+                    (k.trim() == key).then(|| v.trim().to_string())
+                })
+                .unwrap_or_default()
+        };
+        let threads = text
+            .lines()
+            .filter(|line| line.starts_with("processor"))
+            .count();
+        let cores: usize = take("cpu cores").parse().unwrap_or(0);
+        // One hardware thread a core is the machine this was read on; a
+        // different count is named instead of assumed.
+        let threads_per = if threads == cores {
+            "1 thread per core".to_string()
+        } else {
+            format!("{threads} threads")
+        };
+        format!(
+            "Intel Xeon (family {}, model {}, stepping {}), {cores} cores, {threads_per}",
+            take("cpu family"),
+            take("model"),
+            take("stepping")
+        )
+    }
+
+    /// Median, and the interquartile range as the gap between the medians of
+    /// the lower and upper halves.
+    ///
+    /// An even count splits in half. 126 calls give two halves of 63, and 63
+    /// is odd, so each hinge is one of the calls rather than a mean.
+    fn median_and_iqr(samples: &mut [u128]) -> (f64, f64) {
+        samples.sort_unstable();
+        let mid = samples.len() / 2;
+        let med = hinge(samples);
+        let q1 = hinge(&samples[..mid]);
+        let q3 = hinge(&samples[mid..]);
+        (med, q3 - q1)
+    }
+
+    fn hinge(sorted: &[u128]) -> f64 {
+        let n = sorted.len();
+        if n.is_multiple_of(2) {
+            (sorted[n / 2 - 1] + sorted[n / 2]) as f64 / 2.0
+        } else {
+            sorted[n / 2] as f64
+        }
     }
 }
