@@ -569,14 +569,18 @@ impl WorkGraph {
         if live && status != entry.status {
             return Err("upsert: node is claimed; use completeWork".into());
         }
-        // Lifecycle authority: claim/complete own Claimed/Running/terminal.
-        // Upsert only metadata + Todo|Ready|Blocked.
+        // Lifecycle authority: claim/complete own moves into Claimed, Running
+        // or a terminal status. Upsert writes metadata, and Todo, Ready or
+        // Blocked when the node is not held. Repeating the status a held
+        // node already has is not a new status: a summary or role edit has
+        // to land while the holder still has the node.
         match status {
             WorkStatus::Todo | WorkStatus::Ready | WorkStatus::Blocked => {
                 if !live {
                     entry.status = status;
                 }
             }
+            WorkStatus::Claimed | WorkStatus::Running if status == entry.status => {}
             WorkStatus::Claimed
             | WorkStatus::Running
             | WorkStatus::Done
