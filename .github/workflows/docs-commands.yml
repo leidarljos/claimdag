@@ -1,0 +1,39 @@
+name: docs commands
+
+# The docs workflow only runs when docs paths change. A renamed flag is a
+# Rust change, and this job has to fail that pull request, so it has no
+# path filter.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  help-and-examples:
+    runs-on: ubuntu-latest
+    # Same budget as the check workflow's rust job. A cold build of
+    # claimdag-cli is the slow part; the help diff and the examples are not.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          # The toolchain the check workflow builds and tests with.
+          toolchain: 1.97.1
+      - uses: actions/setup-python@v5
+        with:
+          # The interpreter the docs workflow uses. cogapp 3.6 needs 3.11
+          # or newer.
+          python-version: "3.12"
+      # 3.6.0 is the current cogapp release. --diff prints the help line
+      # that moved, and --check-fail-msg names the script that refreshes it.
+      - run: python -m pip install -q cogapp==3.6.0
+      - name: Help matches the reference, examples run
+        run: bash docs/scripts/check-docs.sh

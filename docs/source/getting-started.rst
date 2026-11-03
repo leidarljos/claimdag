@@ -13,12 +13,13 @@ unblock the next.
    $ b=$(claimdag upsert --summary "reject a manifest with no header" --parent $a)
    $ claimdag link $a $b
    $ claimdag list
+   71368334...  todo  task  gen=1  reject a manifest with no header
    092dca29...  ready  task  gen=1  parse the manifest header
-   71368334...  todo   task  gen=1  reject a manifest with no header
 
 Ids are 32 hex characters, minted from the node's own fields. ``link`` adds a
 hard dependency: the child is not ready until the parent is terminal.
-Readiness is derived, never set by hand.
+Readiness is derived, never set by hand. ``list`` prints newest first, and
+breaks a tie on the id, so those two lines can swap.
 
 2. Claim, and fail to claim twice
 =================================
@@ -31,7 +32,7 @@ Actors are ids too. A stable identity is any 32-hex string you keep.
    $ claimdag claim $a --assignee $me
    gen=2
    $ claimdag claim $a --assignee $you
-   error: ...already claimed...
+   claim: status claimed
 
 The generation moved from 1 to 2 on the claim. That number is the token
 everything after carries.

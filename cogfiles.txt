@@ -3,3 +3,7 @@
 # cogapp, not cocogitto: both install a command named cog.
 Cargo.toml -I scripts
 docs/source/conf.py -I scripts
+# reference.org's help comes from claimdag --help. The version job has no
+# binary, so that block keeps its committed text there. docs-commands builds
+# claimdag and fails the check when a flag moves.
+docs/orgmode/reference.org

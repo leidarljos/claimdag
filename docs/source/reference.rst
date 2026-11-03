@@ -3,25 +3,266 @@ Command line
 
 ``claimdag [--dir DIR] VERB``
 
-================================================================================================================ =================================================================================================================================================================================
-Verb                                                                                                             Does
-================================================================================================================ =================================================================================================================================================================================
-``upsert [--id ID] [--kind K] [--status S] [--role R] [--parent ID] [--summary TEXT] [--actor ID]``              create (mint when ``--id`` is absent) or update a node
-``get ID``                                                                                                       one node with its dependencies
-``list [--terminal] [--archived] [--all] [--json]``                                                              nodes, newest first; live work by default
-``claim ID --assignee ID [--gen N]``                                                                             compare-and-swap claim; prints the new generation
-``renew ID [--actor ID]``                                                                                        move the lease, keep the generation
-``release ID (--actor ID \vert --force)``                                                                        hand one claim back before it is terminal: ready, no assignee, generation moved. ``--actor`` must be the holder; ``--force`` acts for nobody and appends a line to ``forced.log``
-``reopen ID [--actor ID]``                                                                                       bring a terminal node back to ready, generation moved. No record of the earlier completion is kept on disk
-``complete ID [--status done\vert failed\vert cancelled] [--summary TEXT] (--actor ID \vert --force) [--gen N]`` terminal; refused when ``--gen`` is stale, and ``done`` is refused while a dependency is unfinished. ``--force`` acts for nobody and appends a line to ``forced.log``
-``reclaim [--lease SECS]``                                                                                       hand back every claim quiet longer than the lease
-``link PARENT CHILD`` / ``unlink PARENT CHILD``                                                                  a hard dependency
-``archive ID`` / ``unarchive ID``                                                                                hide or show a terminal node
-``ready [--role R] [--assignee ID] [--slack N] [--balanced] [--json]``                                           ready nodes ordered by list scheduling or balanced P2C dispersion
-``claim-next --assignee ID [--role R] [--slack N]``                                                              atomically select and claim the best ready node with role affinity and P2C dispersion
-================================================================================================================ =================================================================================================================================================================================
+The verbs and flags below are what ``claimdag --help`` and each verb's
+``--help`` print.
+
+::
+
+   $ claimdag --help
+   CAS claim and complete on a DAG
+
+   Usage: claimdag [OPTIONS] <COMMAND>
+
+   Commands:
+     list        List nodes, newest first. Default is live work only
+     get         Print one node by 32-hex id
+     upsert      Create or update a node. Omit --id to mint
+     claim       Compare-and-swap claim. Omit --gen to ignore generation
+     ready       View ready nodes that can be taken now: unblocked and unfinished
+     claim-next  Atomically claim the best available ready node with load-balanced selection
+     complete    Mark a node terminal (done, failed, or cancelled)
+     renew       Say the holder is still working, moving the lease without changing hands
+     release     Hand one claim back on purpose: ready again, assignee cleared, generation moved
+     reopen      Bring a finished node back to ready, generation moved, so the same work can be taken again
+     reclaim     Hand back every claim quiet for longer than the lease, in seconds
+     link        Add a boolean hard dependency (parent before child)
+     unlink      Drop a boolean hard dependency. Missing edge is ok
+     archive     Soft-hide a terminal node. Not a delete
+     unarchive   Clear the archive flag. Status stays terminal
+     help        Print this message or the help of the given subcommand(s)
+
+   Options:
+         --dir <DIR>  Directory that holds work.bin (else CLAIMDAG_DIR, else the runtime dir, else the state dir)
+     -h, --help       Print help
+     -V, --version    Print version
+
+   Exit status is 0 when the verb ran, 1 when it was refused, and 2 when the arguments could not be read. A refusal names the node, who holds it and the unix second that holder was last written when those apply, and the command that resolves it.
+
+   $ claimdag list --help
+   List nodes, newest first. Default is live work only
+
+   Usage: claimdag list [OPTIONS]
+
+   Options:
+         --terminal  Include non-archived terminal nodes
+         --archived  Include archived nodes
+         --all       Every node, including archived terminals
+         --json      Machine JSON (TUI and hosts). Default is text lines
+     -h, --help      Print help
+
+   $ claimdag get --help
+   Print one node by 32-hex id
+
+   Usage: claimdag get <ID>
+
+   Arguments:
+     <ID>
+
+   Options:
+     -h, --help  Print help
+
+   $ claimdag upsert --help
+   Create or update a node. Omit --id to mint
+
+   Usage: claimdag upsert [OPTIONS]
+
+   Options:
+         --id <ID>
+         --kind <KIND>        [default: task]
+         --status <STATUS>    [default: todo]
+         --role <ROLE>        [default: unset]
+         --parent <PARENT>    Parent work id (32 hex). Zero means unset [default: 00000000000000000000000000000000]
+         --summary <SUMMARY>  [default: ""]
+         --actor <ACTOR>      [default: 00000000000000000000000000000000]
+     -h, --help               Print help
+
+   $ claimdag claim --help
+   Compare-and-swap claim. Omit --gen to ignore generation
+
+   Usage: claimdag claim [OPTIONS] --assignee <ASSIGNEE> <ID>
+
+   Arguments:
+     <ID>
+
+   Options:
+         --assignee <ASSIGNEE>
+         --gen <GEN>
+     -h, --help                 Print help
+
+   $ claimdag ready --help
+   View ready nodes that can be taken now: unblocked and unfinished
+
+   Usage: claimdag ready [OPTIONS]
+
+   Options:
+         --role <ROLE>          Filter or prioritize by role ('explore', 'architect', 'implementor', 'verifier', 'orchestrator', 'general') [default: unset]
+         --assignee <ASSIGNEE>  Requesting worker id (32 hex) for dispersed load balancing [default: 00000000000000000000000000000000]
+         --slack <SLACK>        Critical depth slack for candidate dispersion [default: 1]
+         --balanced             Order by balanced suitability and worker dispersion rather than static depth
+         --json                 Machine JSON (default is text lines)
+     -h, --help                 Print help
+
+   $ claimdag claim-next --help
+   Atomically claim the best available ready node with load-balanced selection
+
+   Usage: claimdag claim-next [OPTIONS] --assignee <ASSIGNEE>
+
+   Options:
+         --assignee <ASSIGNEE>  Who is taking it, 32 hex characters
+         --role <ROLE>          Desired role affinity ('explore', 'architect', 'implementor', 'verifier', 'orchestrator', 'general') [default: unset]
+         --slack <SLACK>        Allowed critical depth slack for candidate dispersion (default 1) [default: 1]
+     -h, --help                 Print help
+
+   $ claimdag complete --help
+   Mark a node terminal (done, failed, or cancelled).
+
+   Pass the --gen returned by claim to be refused if the lease was reclaimed while the work was in flight. Omitting it finishes the node whatever happened to the claim, which is the only way to speak for a node nobody holds.
+
+   --actor names who is finishing it. Without one the call is refused; --force finishes it for nobody, whoever holds it, and appends a line to forced.log in the graph directory.
+
+   Usage: claimdag complete [OPTIONS] <ID>
+
+   Arguments:
+     <ID>
+
+
+   Options:
+         --status <STATUS>
+             [default: done]
+
+         --summary <SUMMARY>
+             [default: ""]
+
+         --actor <ACTOR>
+
+
+         --force
+             Finish it with no actor, whoever holds it. Logged to forced.log
+
+         --gen <GEN>
+
+
+     -h, --help
+             Print help (see a summary with '-h')
+
+   $ claimdag renew --help
+   Say the holder is still working, moving the lease without changing hands
+
+   Usage: claimdag renew [OPTIONS] <ID>
+
+   Arguments:
+     <ID>
+
+   Options:
+         --actor <ACTOR>  [default: 00000000000000000000000000000000]
+     -h, --help           Print help
+
+   $ claimdag release --help
+   Hand one claim back on purpose: ready again, assignee cleared, generation moved.
+
+   The way off a claim before the work is terminal. A holder that stops without this stays busy until the lease runs out, and cannot claim anything else meanwhile.
+
+   --actor names the holder. Without one the call is refused; --force hands the claim back whoever holds it and appends a line to forced.log in the graph directory.
+
+   Usage: claimdag release [OPTIONS] <ID>
+
+   Arguments:
+     <ID>
+
+
+   Options:
+         --actor <ACTOR>
+
+
+         --force
+             Hand it back with no actor, whoever holds it. Logged to forced.log
+
+     -h, --help
+             Print help (see a summary with '-h')
+
+   $ claimdag reopen --help
+   Bring a finished node back to ready, generation moved, so the same work can be taken again
+
+   Usage: claimdag reopen [OPTIONS] <ID>
+
+   Arguments:
+     <ID>
+
+   Options:
+         --actor <ACTOR>  [default: 00000000000000000000000000000000]
+     -h, --help           Print help
+
+   $ claimdag reclaim --help
+   Hand back every claim quiet for longer than the lease, in seconds.
+
+   A claim with no expiry is a claim a crashed worker keeps, and the holder's identity stays busy with it. This is what returns both.
+
+   Usage: claimdag reclaim [OPTIONS]
+
+   Options:
+         --lease <LEASE>
+             [default: 900]
+
+     -h, --help
+             Print help (see a summary with '-h')
+
+   $ claimdag link --help
+   Add a boolean hard dependency (parent before child)
+
+   Usage: claimdag link [OPTIONS] <PARENT> <CHILD>
+
+   Arguments:
+     <PARENT>
+     <CHILD>
+
+   Options:
+         --actor <ACTOR>  [default: 00000000000000000000000000000000]
+     -h, --help           Print help
+
+   $ claimdag unlink --help
+   Drop a boolean hard dependency. Missing edge is ok
+
+   Usage: claimdag unlink [OPTIONS] <PARENT> <CHILD>
+
+   Arguments:
+     <PARENT>
+     <CHILD>
+
+   Options:
+         --actor <ACTOR>  [default: 00000000000000000000000000000000]
+     -h, --help           Print help
+
+   $ claimdag archive --help
+   Soft-hide a terminal node. Not a delete
+
+   Usage: claimdag archive [OPTIONS] <ID>
+
+   Arguments:
+     <ID>
+
+   Options:
+         --actor <ACTOR>  [default: 00000000000000000000000000000000]
+     -h, --help           Print help
+
+   $ claimdag unarchive --help
+   Clear the archive flag. Status stays terminal
+
+   Usage: claimdag unarchive [OPTIONS] <ID>
+
+   Arguments:
+     <ID>
+
+   Options:
+         --actor <ACTOR>  [default: 00000000000000000000000000000000]
+     -h, --help           Print help
 
 Ids are 32 lowercase hex characters (xxHash3-128). The zero id means unset.
+
+``claim`` prints the new generation. ``renew`` moves the lease and keeps that
+generation. ``get`` prints the node and its dependencies. ``complete --status
+done`` is refused while a dependency is unfinished. ``reopen`` brings a
+terminal node back to ready and moves the generation; no record of the
+earlier completion is kept on disk.
 
 Statuses
 ========

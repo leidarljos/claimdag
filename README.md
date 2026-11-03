@@ -36,19 +36,21 @@ $ a=$(claimdag upsert --summary "parse the manifest header")
 $ b=$(claimdag upsert --summary "reject a manifest with no header" --parent $a)
 $ claimdag link $a $b
 $ claimdag list
+71368334...  todo  task  gen=1  reject a manifest with no header
 092dca29...  ready  task  gen=1  parse the manifest header
-71368334...  todo   task  gen=1  reject a manifest with no header
 ```
 
 ```console
-$ claimdag --dir /var/lib/seat upsert --summary "land the adapter"
+$ me=$(printf '%032x' 7)
+$ a=$(claimdag --dir /var/lib/seat upsert --summary "land the adapter")
+$ b=$(claimdag --dir /var/lib/seat upsert --summary "write the tree")
+$ claimdag --dir /var/lib/seat link $a $b
 $ claimdag --dir /var/lib/seat list
 $ claimdag --dir /var/lib/seat list --json --all
-$ claimdag --dir /var/lib/seat claim <id> --assignee <actor>
-$ claimdag --dir /var/lib/seat release <id> --actor <actor>   # hand it back unfinished
-$ claimdag --dir /var/lib/seat complete <id> --actor <actor>
-$ claimdag --dir /var/lib/seat archive <id>
-$ claimdag --dir /var/lib/seat link <parent> <child>
+$ claimdag --dir /var/lib/seat claim $a --assignee $me
+$ claimdag --dir /var/lib/seat release $a --actor $me
+$ claimdag --dir /var/lib/seat complete $a --actor $me
+$ claimdag --dir /var/lib/seat archive $a
 ```
 
 ## Law
