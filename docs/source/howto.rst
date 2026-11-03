@@ -91,9 +91,9 @@ Serve to an agent
 
    $ claimdag-mcp
 
-The tools that read are ``claimdag_ready``, ``claimdag_ready_balanced``,
-``claimdag_list`` and ``claimdag_get``. The rest change the graph:
-``claimdag_upsert``, ``claimdag_link``, ``claimdag_unlink``, ``claimdag_claim``,
-``claimdag_claim_next``, ``claimdag_renew``, ``claimdag_release``,
-``claimdag_reopen``, ``claimdag_complete`` and ``claimdag_reclaim``. Two prompts
-sequence taking the next node under a lease and sweeping stale claims.
+The tools that read are ``claimdag_ready`` and ``claimdag_ready_balanced``.
+``claimdag_list`` and ``claimdag_get`` read as well.
+The rest change the graph: ``claimdag_upsert``, ``claimdag_link`` and ``claimdag_unlink``.
+Also ``claimdag_claim``, ``claimdag_claim_next``, ``claimdag_renew`` and ``claimdag_release``.
+Also ``claimdag_reopen``, ``claimdag_complete`` and ``claimdag_reclaim``.
+Two prompts sequence taking the next node under a lease and sweeping stale claims.
