@@ -31,7 +31,18 @@ path = "src/lib.rs"
 [dependencies]
 claimdag.workspace = true
 clap.workspace = true
-ratatui = "0.30.2"
+# The pane draws with crossterm. underline-color is a default feature, and
+# it is the one that locks the termina and termwiz backends: it names them
+# with a weak feature, and Cargo still records the backends in Cargo.lock.
+# They are never built. With them come terminfo (WTFPL) and wezterm-bidi
+# and finl_unicode (each MIT AND Unicode-DFS-2016). deny.toml allows none
+# of those. The other default features stay on.
+ratatui = { version = "0.30.2", default-features = false, features = [
+    "all-widgets",
+    "crossterm",
+    "layout-cache",
+    "macros",
+] }
 serde_json.workspace = true
 # The seat's actor id is the truncated SHA-256 of user@host, and the ids
 # already written into work.bin were minted that way.
