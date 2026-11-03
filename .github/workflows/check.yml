@@ -13,8 +13,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ubuntu-latest alone never ran the suite on the arm64 Linux or macOS
+  # hosts the release workflow builds. flock and geteuid come from libc,
+  # so these steps run on those hosts too.
   rust:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4

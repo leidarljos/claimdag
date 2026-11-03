@@ -28,13 +28,30 @@ fn derive(user: &str, host: &str) -> WorkId {
     WorkId::from_hex(&hex).unwrap_or(WorkId::ZERO)
 }
 
+/// POSIX `_POSIX_HOST_NAME_MAX` is 255. `gethostname` needs one more byte
+/// for the trailing NUL. Linux's own limit is 64, which fits inside this.
+const HOST_NAME_CAP: usize = 256;
+
 /// This machine's name, or `localhost` when the kernel will not say.
+///
+/// `gethostname` is the call Linux and macOS both answer. A read of
+/// `/proc/sys/kernel/hostname` comes back empty on macOS, and the pane
+/// would then claim as `user@localhost` on every Mac.
 fn hostname() -> String {
-    std::fs::read_to_string("/proc/sys/kernel/hostname")
-        .ok()
-        .map(|raw| raw.trim().to_string())
-        .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| "localhost".to_string())
+    let mut buf = [0u8; HOST_NAME_CAP];
+    // SAFETY: the buffer is HOST_NAME_CAP bytes and gethostname writes at
+    // most that many. It does not keep the pointer.
+    let rc = unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len()) };
+    if rc != 0 {
+        return "localhost".to_string();
+    }
+    let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+    let name = String::from_utf8_lossy(&buf[..end]).trim().to_string();
+    if name.is_empty() {
+        "localhost".to_string()
+    } else {
+        name
+    }
 }
 
 #[cfg(test)]
@@ -55,6 +72,24 @@ mod tests {
             derive("someone", "somewhere"),
             derive("someone", "elsewhere")
         );
+    }
+
+    /// The name is this machine's. On macOS there is no `/proc`, and
+    /// `localhost` would make two Macs the same seat.
+    #[test]
+    fn the_seat_takes_this_machines_name() {
+        let out = std::process::Command::new("hostname")
+            .output()
+            .expect("hostname");
+        assert!(
+            out.status.success(),
+            "hostname: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let expected = String::from_utf8(out.stdout).expect("hostname is utf-8");
+        let expected = expected.trim();
+        assert!(!expected.is_empty());
+        assert_eq!(hostname(), expected);
     }
 
     #[test]

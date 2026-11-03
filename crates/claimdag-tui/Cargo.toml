@@ -33,6 +33,9 @@ serde_json.workspace = true
 # The seat's actor id is the truncated SHA-256 of user@host, and the ids
 # already written into work.bin were minted that way.
 sha2 = "0.10"
+# gethostname, so the host half of that id is this machine on Linux and
+# on macOS. /proc/sys/kernel/hostname exists only on Linux.
+libc = "0.2"
 
 [dev-dependencies]
 tempfile = "3"
