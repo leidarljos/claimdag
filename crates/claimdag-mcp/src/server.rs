@@ -15,7 +15,10 @@ use crate::args::*;
 
 #[derive(Clone)]
 pub struct ClaimdagServer {
-    dir: PathBuf,
+    /// Set when `CLAIMDAG_DIR` named the directory, or a test opened one.
+    /// A named directory stays fixed. `None` means the defaults, which
+    /// `dir` resolves again on each call.
+    dir: Option<PathBuf>,
 }
 
 /// One node, as an agent reads it.
@@ -150,10 +153,19 @@ fn invalid(why: String) -> Fail {
 #[tool_router]
 impl ClaimdagServer {
     /// Open on the graph this seat keeps.
+    ///
+    /// `CLAIMDAG_DIR` fixes the directory. Otherwise the defaults are
+    /// resolved again on each call, and this startup resolve only says,
+    /// once, when another location holds work.
     #[must_use]
     pub fn from_env() -> Self {
+        let named = std::env::var_os("CLAIMDAG_DIR").is_some_and(|raw| !raw.is_empty());
+        // Said once at startup when another location holds work. A call uses
+        // this path only when the directory was named; the defaults are
+        // resolved again in `dir`.
+        let resolved = claimdag::resolve_dir(None);
         Self {
-            dir: claimdag::resolve_dir(None),
+            dir: named.then_some(resolved),
         }
     }
 
@@ -161,7 +173,28 @@ impl ClaimdagServer {
     #[cfg(test)]
     #[must_use]
     pub fn at(dir: PathBuf) -> Self {
-        Self { dir }
+        Self { dir: Some(dir) }
+    }
+
+    /// The directory this call reads and writes.
+    ///
+    /// A named directory stays the one given. The defaults are resolved
+    /// again: `claimdag where --move` can put the graph in an earlier
+    /// default while this process is still up, and a path kept from startup
+    /// would keep reading the old one.
+    ///
+    /// `locate` stats at most five paths. On `claimdag_ready` with the graph
+    /// in `/tmp/claimdag-UID` and the home state directory empty, 21 calls
+    /// an arm interleaved across six rounds (126 calls), the cached median
+    /// was 105 µs (IQR 16) and resolving each call was 111 µs (IQR 20). The
+    /// difference is under a millisecond and inside that spread, so an
+    /// unnamed call resolves every time. Intel Xeon (family 6, model 207),
+    /// 8 cores, one thread per core, Linux 6.12, release.
+    fn dir(&self) -> PathBuf {
+        if let Some(dir) = &self.dir {
+            return dir.clone();
+        }
+        claimdag::locate(None).dir().to_path_buf()
     }
 
     /// A graph to read, or the reason there is none.
@@ -170,14 +203,19 @@ impl ClaimdagServer {
     /// claimable", because those are opposite answers: one is a quiet seat and
     /// the other is a caller pointed at the wrong place.
     fn reading(&self) -> Result<WorkGraph, Fail> {
-        WorkGraph::open_dir(&self.dir).map_err(|absent: Absent| bad(absent.to_string()))
+        WorkGraph::open_dir(&self.dir()).map_err(|absent: Absent| bad(absent.to_string()))
     }
 
-    /// The graph a writing verb starts from. The caller holds the lock. A
-    /// snapshot that does not parse is refused, never replaced by an empty
-    /// graph and saved over.
-    fn writing(&self) -> Result<WorkGraph, Fail> {
-        WorkGraph::load_for_write(&self.dir).map_err(|absent: Absent| bad(absent.to_string()))
+    /// The directory, the lock on it, and the graph a writing verb starts
+    /// from. The lock is taken before the load and held by the caller across
+    /// the save. A snapshot that does not parse is refused, never replaced
+    /// by an empty graph and saved over.
+    fn writing(&self) -> Result<(PathBuf, claimdag::lock::Lock, WorkGraph), Fail> {
+        let dir = self.dir();
+        let lock = claimdag::lock_dir(&dir).map_err(bad)?;
+        let graph =
+            WorkGraph::load_for_write(&dir).map_err(|absent: Absent| bad(absent.to_string()))?;
+        Ok((dir, lock, graph))
     }
 
     #[tool(
@@ -277,10 +315,9 @@ impl ClaimdagServer {
     ) -> Result<Json<ClaimRow>, Fail> {
         let id = parse(&args.id)?;
         let assignee = parse(&args.assignee)?;
-        let _lock = claimdag::lock_dir(&self.dir).map_err(bad)?;
-        let mut graph = self.writing()?;
+        let (dir, _lock, mut graph) = self.writing()?;
         let generation = graph.claim(id, assignee, args.generation).map_err(bad)?;
-        graph.save_dir(&self.dir).map_err(bad)?;
+        graph.save_dir(&dir).map_err(bad)?;
         Ok(Json(ClaimRow {
             id: id.to_hex(),
             generation,
@@ -304,10 +341,9 @@ impl ClaimdagServer {
         let assignee = parse(&args.assignee)?;
         let role = WorkRole::from(args.role.unwrap_or(crate::args::Role::Unset));
         let slack = args.slack.unwrap_or(1);
-        let _lock = claimdag::lock_dir(&self.dir).map_err(bad)?;
-        let mut graph = self.writing()?;
+        let (dir, _lock, mut graph) = self.writing()?;
         let (id, generation) = graph.claim_next(assignee, role, slack).map_err(bad)?;
-        graph.save_dir(&self.dir).map_err(bad)?;
+        graph.save_dir(&dir).map_err(bad)?;
         Ok(Json(ClaimRow {
             id: id.to_hex(),
             generation,
@@ -330,10 +366,9 @@ impl ClaimdagServer {
     ) -> Result<Json<ClaimRow>, Fail> {
         let id = parse(&args.id)?;
         let actor = parse(&args.actor)?;
-        let _lock = claimdag::lock_dir(&self.dir).map_err(bad)?;
-        let mut graph = self.writing()?;
+        let (dir, _lock, mut graph) = self.writing()?;
         let generation = graph.renew(id, actor).map_err(bad)?;
-        graph.save_dir(&self.dir).map_err(bad)?;
+        graph.save_dir(&dir).map_err(bad)?;
         Ok(Json(ClaimRow {
             id: id.to_hex(),
             generation,
@@ -356,10 +391,9 @@ impl ClaimdagServer {
     ) -> Result<Json<ClaimRow>, Fail> {
         let id = parse(&args.id)?;
         let actor = parse(&args.actor)?;
-        let _lock = claimdag::lock_dir(&self.dir).map_err(bad)?;
-        let mut graph = self.writing()?;
+        let (dir, _lock, mut graph) = self.writing()?;
         let generation = graph.release(id, actor).map_err(bad)?;
-        graph.save_dir(&self.dir).map_err(bad)?;
+        graph.save_dir(&dir).map_err(bad)?;
         Ok(Json(ClaimRow {
             id: id.to_hex(),
             generation,
@@ -382,10 +416,9 @@ impl ClaimdagServer {
     ) -> Result<Json<ClaimRow>, Fail> {
         let id = parse(&args.id)?;
         let actor = parse(&args.actor)?;
-        let _lock = claimdag::lock_dir(&self.dir).map_err(bad)?;
-        let mut graph = self.writing()?;
+        let (dir, _lock, mut graph) = self.writing()?;
         let generation = graph.reopen(id, actor).map_err(bad)?;
-        graph.save_dir(&self.dir).map_err(bad)?;
+        graph.save_dir(&dir).map_err(bad)?;
         Ok(Json(ClaimRow {
             id: id.to_hex(),
             generation,
@@ -418,8 +451,7 @@ impl ClaimdagServer {
                 )));
             }
         };
-        let _lock = claimdag::lock_dir(&self.dir).map_err(bad)?;
-        let mut graph = self.writing()?;
+        let (dir, _lock, mut graph) = self.writing()?;
         graph
             .complete(
                 id,
@@ -429,7 +461,7 @@ impl ClaimdagServer {
                 args.generation,
             )
             .map_err(bad)?;
-        graph.save_dir(&self.dir).map_err(bad)?;
+        graph.save_dir(&dir).map_err(bad)?;
         if let Some(node) = graph.get(id) {
             let now = now_unix();
             let depth = graph.critical_depth();
@@ -477,11 +509,10 @@ impl ClaimdagServer {
         &self,
         Parameters(args): Parameters<ReclaimArgs>,
     ) -> Result<Json<Vec<String>>, Fail> {
-        let _lock = claimdag::lock_dir(&self.dir).map_err(bad)?;
-        let mut graph = self.writing()?;
+        let (dir, _lock, mut graph) = self.writing()?;
         let handed = graph.reclaim(args.lease_seconds);
         if !handed.is_empty() {
-            graph.save_dir(&self.dir).map_err(bad)?;
+            graph.save_dir(&dir).map_err(bad)?;
         }
         Ok(Json(handed.iter().map(|id| id.to_hex()).collect()))
     }
@@ -559,8 +590,7 @@ impl ClaimdagServer {
                 WorkStatus::parse_str(raw).ok_or_else(|| invalid(format!("bad status {raw}")))?,
             ),
         };
-        let _lock = claimdag::lock_dir(&self.dir).map_err(bad)?;
-        let mut graph = self.writing()?;
+        let (dir, _lock, mut graph) = self.writing()?;
         let present = graph.get(id).map(|node| node.status);
         // Omitting status keeps the node's status. A minted node has none yet,
         // and todo is the status a node is created with; the dependencies then
@@ -585,7 +615,7 @@ impl ClaimdagServer {
                 },
             )
             .map_err(bad)?;
-        graph.save_dir(&self.dir).map_err(bad)?;
+        graph.save_dir(&dir).map_err(bad)?;
         Ok(Json(shown(&graph, id)?))
     }
 
@@ -606,10 +636,9 @@ impl ClaimdagServer {
         let parent = parse(&args.parent)?;
         let child = parse(&args.child)?;
         let actor = parse(&args.actor)?;
-        let _lock = claimdag::lock_dir(&self.dir).map_err(bad)?;
-        let mut graph = self.writing()?;
+        let (dir, _lock, mut graph) = self.writing()?;
         graph.link_dep(parent, child, actor).map_err(bad)?;
-        graph.save_dir(&self.dir).map_err(bad)?;
+        graph.save_dir(&dir).map_err(bad)?;
         Ok(Json(shown(&graph, child)?))
     }
 
@@ -630,10 +659,9 @@ impl ClaimdagServer {
         let parent = parse(&args.parent)?;
         let child = parse(&args.child)?;
         let actor = parse(&args.actor)?;
-        let _lock = claimdag::lock_dir(&self.dir).map_err(bad)?;
-        let mut graph = self.writing()?;
+        let (dir, _lock, mut graph) = self.writing()?;
         graph.unlink_dep(parent, child, actor).map_err(bad)?;
-        graph.save_dir(&self.dir).map_err(bad)?;
+        graph.save_dir(&dir).map_err(bad)?;
         Ok(Json(shown(&graph, child)?))
     }
 }
