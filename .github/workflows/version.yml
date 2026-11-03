@@ -1,0 +1,37 @@
+name: version
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cog:
+    name: cog --check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          # The docs workflow already installs 3.12. tomllib, which the
+          # generator reads the manifest with, is in the stdlib from 3.11.
+          python-version: "3.12"
+      # cogapp 3.6.0, not cocogitto: both install a command named cog.
+      # 3.6.0 is the cogapp release the other leidarljos checks run, and
+      # it supports --check. The version is written by hand only in
+      # [workspace.package]. Every copy cogfiles.txt lists has to be what
+      # that cogapp would generate from it.
+      - name: cog --check
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check -q 'cogapp==3.6.0'
+          cog --check --diff --check-fail-msg='run cog -r @cogfiles.txt' @cogfiles.txt

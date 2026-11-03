@@ -8,6 +8,8 @@ members = [
 ]
 
 [workspace.package]
+# The only version written by hand. The copies cogfiles.txt lists are cog
+# blocks; `cog -r @cogfiles.txt` rewrites them from this line.
 version = "0.8.0"
 edition = "2021"
 rust-version = "1.85"
@@ -24,4 +26,7 @@ xxhash-rust = { version = "0.8", features = ["xxh3"] }
 clap = { version = "4", features = ["derive"] }
 capnp = "0.27"
 memmap2 = "0.9"
+# Published path dependency. cog writes the version from [workspace.package].
+# [[[cog import claimdag_version as v; cog.out(v.dependency_line()) ]]]
 claimdag = { path = "crates/claimdag", version = "0.8.0" }
+# [[[end]]]

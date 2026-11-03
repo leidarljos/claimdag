@@ -13,8 +13,11 @@ _ORG = _DOCS.parent / "orgmode"
 project = "claimdag"
 copyright = "2026, Rohit Goswami"
 author = "Rohit Goswami"
-release = "0.2.0"
-version = "0.2"
+# cog writes these from [workspace.package] version in the workspace Cargo.toml.
+# [[[cog import claimdag_version as v; cog.out(v.sphinx_lines()) ]]]
+release = "0.8.0"
+version = "0.8"
+# [[[end]]]
 
 extensions = [
     "sphinx.ext.mathjax",
