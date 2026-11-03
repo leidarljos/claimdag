@@ -1,0 +1,40 @@
+name: fixture-0.8.0
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  generator:
+    name: build gen-0.8.0
+    runs-on: ubuntu-latest
+    # Same budget as the workspace check. This job builds one small crate.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          # The toolchain the workspace check builds with.
+          toolchain: 1.97.1
+      # The generator is not a workspace member, so the workspace check
+      # never compiles it. The cache keeps the tag's crate and the last
+      # build; the key changes when the generator or its lockfile does.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            crates/claimdag/tests/fixtures/gen-0.8.0/target
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: gen-0.8.0-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('crates/claimdag/tests/fixtures/gen-0.8.0/**') }}
+          restore-keys: |
+            gen-0.8.0-${{ runner.os }}-${{ runner.arch }}-
+      - name: Build the 0.8.0 snapshot generator
+        run: cargo build --locked --manifest-path crates/claimdag/tests/fixtures/gen-0.8.0/Cargo.toml

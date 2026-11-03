@@ -1,0 +1,17 @@
+# Writes fixtures/work-0.8.0.bin with claimdag pinned to the v0.8.0 tag, so
+# tests/compat_0_8_0.rs reads a file that release wrote. It is not a
+# workspace member: it has to keep building that tag after this checkout
+# moves on. CI builds it from the lockfile and caches that build. From
+# this directory,
+# `cargo run --locked -- ../work-0.8.0.bin ../work-0.8.0.txt` writes both
+# files.
+[package]
+name = "claimdag-fixture-0-8-0"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+claimdag = { git = "https://github.com/leidarljos/claimdag", tag = "v0.8.0" }
+
+[workspace]
