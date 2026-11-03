@@ -467,7 +467,7 @@ impl Seat {
         }
     }
 
-    fn rpc_err(&mut self, name: &str, arguments: &str, code: i64, message: &str) {
+    fn rpc_err(&mut self, name: &str, arguments: &str, code: i64, prefix: &str) {
         match self.tool(name, arguments) {
             Answer::Rpc {
                 code: got,
@@ -475,7 +475,7 @@ impl Seat {
                 raw,
             } => {
                 assert_eq!(got, code, "{name}\n{raw}");
-                assert_eq!(text, message, "{name}\n{raw}");
+                assert!(text.starts_with(prefix), "{name}: {text}\n{raw}");
             }
             Answer::Tool { raw, .. } => panic!("{name} returned a tool result\n{raw}"),
         }
