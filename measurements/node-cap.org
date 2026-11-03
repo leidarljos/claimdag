@@ -1,0 +1,130 @@
+#+title: Node cap: what a call costs against the node count
+#+options: toc:nil num:nil
+
+Every call loads =work.bin= whole and every writing call saves it whole, so a
+call pays a fixed part and a part for each node. These numbers set
+=MAX_WORK_NODES=, =MAX_LEDGER= and =MAX_PRUNED= in
+=crates/claimdag/src/graph.rs=.
+
+* Machine and code
+
+- CPU: Intel Xeon (family 6, model 207, stepping 2), 8 cores, 1 thread per
+  core, 1 socket. CPU only.
+- Disk: ext4, which also holds the temporary directory the graphs live in.
+- Linux 6.12.94, Ubuntu 24.04.5, Rust 1.97.1, release build.
+- Code: e0f79d7 (v0.8.0) with this change applied. Rows marked e0f79d7 ran
+  that commit alone, with =examples/node_cap.rs= copied in.
+
+* Command
+
+#+begin_src sh
+cargo +1.97.1 build --release --workspace
+for run in 1 2 3 4 5; do
+  cargo +1.97.1 run --release -p claimdag --example node_cap -- target/release/claimdag
+done
+for pad in 0 50 114 242 498; do
+  for run in 1 2 3; do
+    cargo +1.97.1 run --release -p claimdag --example node_cap -- target/release/claimdag 4096 $pad
+  done
+done
+#+end_src
+
+The e0f79d7 rows are the first loop with =4096= as the sizes, run on that
+commit between the runs of this change. It stops after the =finished= row,
+because e0f79d7 writes no =pruned.log= for the =compact= row to fill.
+
+Each run prints one table. Every cell is the median of 21 calls, and every
+figure below is the median of the five runs (three for the summary lengths),
+with the range of the write column across them. The columns:
+
+- bytes: the size of =work.bin=.
+- load: =WorkGraph::open_dir= in process.
+- save: =WorkGraph::save_dir= in process.
+- read: a =claimdag get= call, process start to exit.
+- write: a =claimdag upsert= call, which loads, saves and exits.
+
+Summaries are =work item N=, up to 14 bytes.
+
+* The cost grows with the node count
+
+Live nodes, which prune never drops, so the graph can go past the cap. The
+write updates an existing node.
+
+| nodes |    bytes | B/node | load ms | save ms | read ms | write ms | write range |
+|-------+----------+--------+---------+---------+---------+----------+-------------|
+|  1024 |   196704 |    192 |    0.51 |    0.71 |    1.46 |     3.60 | 2.92-3.85   |
+|  2048 |   393312 |    192 |    0.98 |    1.06 |    2.09 |     4.79 | 4.51-5.00   |
+|  4096 |   786528 |    192 |    2.27 |    1.70 |    3.23 |     7.10 | 6.75-7.33   |
+|  8192 |  1572960 |    192 |    4.80 |    4.71 |    5.73 |    11.42 | 10.70-11.65 |
+| 16384 |  3145824 |    192 |    9.96 |    8.81 |   10.54 |    19.68 | 18.74-20.12 |
+| 32768 |  6291552 |    192 |   18.92 |   12.71 |   20.23 |    37.56 | 37.12-41.26 |
+| 65536 | 12583008 |    192 |   41.37 |   25.19 |   40.87 |    73.07 | 71.83-80.32 |
+
+The snapshot is 96 bytes plus 192 a node. A least-squares line through the
+medians puts a read at 0.7 ms plus 0.61 µs a node, and a write at 2.5 ms plus
+1.08 µs a node. The cost is not flat, so the cap stays.
+
+* The budget, and the cap it gives
+
+A writing call on a full graph gets 10 ms. That is a tenth of the 100 ms
+within which an answer still reads as immediate (Miller 1968, "Response time
+in man-computer conversational transactions"; Nielsen 1993, "Usability
+Engineering", chapter 5), so a seat can chain ten calls inside it.
+
+4096 is the largest measured size inside the budget: 7.10 ms, and no run went
+past 7.33 ms. 8192 took 11.42 ms, and every one of its runs was over 10 ms.
+The line above crosses 10 ms near 7000 nodes of short summaries. The cap
+stays at 4096 rather than going there, so that the rest covers longer
+summaries:
+
+| summary bytes | live B/node | live write ms | finished write ms | compact write ms |
+|---------------+-------------+---------------+-------------------+------------------|
+|      up to 14 |         192 |          7.60 |              6.95 |             7.61 |
+|      up to 64 |         246 |          7.76 |              7.36 |             7.59 |
+|     up to 128 |         310 |          7.70 |              8.20 |             8.15 |
+|     up to 256 |         438 |          8.42 |              8.76 |             9.11 |
+|     up to 512 |         694 |         10.00 |              9.84 |             9.76 |
+
+Summaries up to 256 bytes stay inside the budget (9.11 ms at worst).
+Summaries of 512 bytes reach it.
+
+The Cap'n Proto reader refuses a message past 8 Mi words (64 MiB) by
+default, about 349,000 nodes at 192 bytes each. The budget binds long before
+that ceiling does.
+
+* A full graph in steady state
+
+=finished=: every node finished, each new node dropping the oldest, and at
+least a graph's worth of dropped nodes named in =pruned.log=. The write
+creates a node, so it drops one and appends its line. =compact=: the same
+graph with =pruned.log= naming twice the cap, so the write also rewrites the
+file down to the newest 4096. The read asks for a node the graph holds.
+
+| graph    | code        | load ms | save ms | read ms | write ms | write range |
+|----------+-------------+---------+---------+---------+----------+-------------|
+| live     | e0f79d7     |    2.27 |    1.57 |    3.32 |     6.94 | 6.43-7.91   |
+| live     | this change |    2.27 |    1.70 |    3.23 |     7.10 | 6.75-7.33   |
+| finished | e0f79d7     |    1.60 |    1.61 |    3.22 |     6.81 | 6.56-7.27   |
+| finished | this change |    1.51 |    2.07 |    3.24 |     6.86 | 6.61-7.12   |
+| compact  | this change |    1.50 |    1.56 |    3.16 |     7.16 | 6.82-7.72   |
+
+Appending to =pruned.log= costs nothing measurable: =finished= is within
+the e0f79d7 range. A rewrite adds about 0.3 ms (=compact= against
+=finished=), so it comes once in 4096 drops instead of on every one. A read
+never opens =pruned.log=. The file is read only for an id the graph does not
+hold, and on a save that dropped nodes.
+
+* The ledger and the pruned list
+
+The ledger is kept in memory, never in =work.bin=. The command line, the MCP
+server and the TUI each load a fresh graph for every call, so its cap bounds
+only a program that keeps one graph for many calls. The budget is the graph
+itself. =MAX_LEDGER= is two entries for each node of a full graph, a
+creation and a finish, which is 8192 entries of 64 bytes, 512 KiB. That is
+under the 768 KiB snapshot of the same graph.
+
+=MAX_PRUNED= is one graph's worth, 4096 nodes, so a finished node is
+answered for until as many again have been dropped after it. The file holds
+at most twice that, one =ID STATUS= line of 38 to 43 bytes for each, so at
+most 344 KiB. The =compact= write above reads and rewrites the largest it
+gets.

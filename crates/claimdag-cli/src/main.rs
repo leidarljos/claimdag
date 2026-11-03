@@ -268,6 +268,16 @@ fn print_get(n: &WorkNode) {
     println!("deps  {deps}");
 }
 
+/// The answer to a complete or release of a node the graph dropped after it
+/// finished: there is nothing left to finish or hand back.
+fn print_pruned(id: WorkId, was: WorkStatus) {
+    println!(
+        "{}  {}  already terminal and pruned; nothing changed",
+        id.to_hex(),
+        was.as_str()
+    );
+}
+
 /// The file in the graph directory that keeps every forced release and
 /// complete, one line each.
 const FORCED_LOG: &str = "forced.log";
@@ -463,7 +473,10 @@ fn run() -> Result<(), String> {
                     log_forced(&dir, "complete", id, holder, status.as_str())?;
                 }
             }
-            println!("{}  {}", id.to_hex(), status.as_str());
+            match g.pruned(id) {
+                Some(was) => print_pruned(id, was),
+                None => println!("{}  {}", id.to_hex(), status.as_str()),
+            }
         }
         Cmd::Renew { id, actor } => {
             let id = parse_id(&id)?;
@@ -487,7 +500,10 @@ fn run() -> Result<(), String> {
                     cas
                 }
             };
-            println!("gen={cas}");
+            match g.pruned(id) {
+                Some(was) => print_pruned(id, was),
+                None => println!("gen={cas}"),
+            }
         }
         Cmd::Reopen { id, actor } => {
             let id = parse_id(&id)?;

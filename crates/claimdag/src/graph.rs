@@ -34,8 +34,33 @@ pub const FORMAT_V1: &str = "claimdag/v1";
 /// Snapshot filename under the host state dir (unpacked Cap'n, mmap).
 pub const SNAP_FILE: &str = crate::snap::SNAP_BIN;
 
+/// How many nodes the graph holds before prune drops finished work. Every
+/// call loads the whole snapshot, and a writing call saves it whole, so the
+/// cost grows with the node count (measurements/node-cap.org, 8-core Xeon).
+/// The budget is 10 ms for a writing call on a full graph, a tenth of the
+/// 100 ms within which an answer still reads as immediate (Miller 1968,
+/// Nielsen 1993), so a seat can chain ten calls in that time. 4096 is the
+/// largest measured size inside it (7.1 ms; 8192 took 11.4 ms), and what
+/// is left covers summaries up to 256 bytes (9.1 ms).
 const MAX_WORK_NODES: usize = 4096;
-const MAX_LEDGER: usize = 8192;
+
+/// Nothing outside this crate reads the ledger, and the command line, the
+/// MCP server and the TUI each load a fresh graph for every call, so the
+/// cap only bounds a program that keeps one graph for many calls. The
+/// budget is the graph itself: room for two ops, a creation and a finish,
+/// for every node a full graph holds is 512 KiB of 64-byte entries, under
+/// the 768 KiB snapshot of that graph (measurements/node-cap.org).
+const MAX_LEDGER: usize = 2 * MAX_WORK_NODES;
+
+/// How many pruned nodes the graph answers for at least: one full graph's
+/// worth, so a finished node is remembered until as many nodes again have
+/// been dropped after it. measurements/node-cap.org has the cost.
+const MAX_PRUNED: usize = MAX_WORK_NODES;
+
+/// The file beside `work.bin` that names each pruned node and the status
+/// it finished with, one `ID STATUS` line each, oldest first. It is not in
+/// `work.bin`, so the snapshot keeps the bytes earlier releases wrote.
+const PRUNED_FILE: &str = "pruned.log";
 
 /// An id that is not in the snapshot.
 ///
@@ -258,6 +283,13 @@ pub struct WorkGraph {
     ledger: VecDeque<WorkLedgerEntry>,
     next_seq: u64,
     mint_seq: u64,
+    /// `pruned.log` in the directory the graph was loaded from.
+    pruned_path: Option<PathBuf>,
+    /// What that file holds, read on the first question about an id the
+    /// graph does not hold, so a call that asks none never reads it.
+    pruned_log: std::sync::OnceLock<String>,
+    /// The finished nodes this graph dropped itself, oldest first.
+    dropped: Vec<(WorkId, WorkStatus)>,
 }
 
 /// Why a seat's work graph could not be read.
@@ -326,6 +358,31 @@ impl WorkGraph {
         self.nodes.get(&id)
     }
 
+    /// The status a node finished with before prune dropped it. `None` for a
+    /// node the graph holds, never had, or pruned too long ago to remember.
+    #[must_use]
+    pub fn pruned(&self, id: WorkId) -> Option<WorkStatus> {
+        if self.nodes.contains_key(&id) {
+            return None;
+        }
+        if let Some((_, status)) = self.dropped.iter().rev().find(|(gone, _)| *gone == id) {
+            return Some(*status);
+        }
+        let hex = id.to_hex();
+        let log = self.pruned_log.get_or_init(|| {
+            self.pruned_path
+                .as_deref()
+                .and_then(|path| std::fs::read_to_string(path).ok())
+                .unwrap_or_default()
+        });
+        log.lines().rev().find_map(|line| {
+            let (gone, status) = line.split_once(' ')?;
+            (gone == hex)
+                .then(|| WorkStatus::parse_str(status))?
+                .filter(|s| s.is_terminal())
+        })
+    }
+
     pub fn list(&self) -> Vec<&WorkNode> {
         self.list_view(true, true)
     }
@@ -379,7 +436,9 @@ impl WorkGraph {
             .collect();
         terminal.sort_by_key(|(_, arch, t)| (*arch, *t));
         for (id, _, _) in terminal.into_iter().take(overflow) {
-            self.nodes.remove(&id);
+            if let Some(gone) = self.nodes.remove(&id) {
+                self.dropped.push((id, gone.status));
+            }
         }
     }
 
@@ -945,6 +1004,9 @@ impl WorkGraph {
         if assignee.is_zero() {
             return Err("claim: zero assignee".into());
         }
+        if let Some(was) = self.pruned(id) {
+            return Err(format!("claim: status {}, pruned", was.as_str()));
+        }
         let deps: Vec<WorkId> = {
             let node = self.nodes.get(&id).ok_or_else(|| unknown_id("claim", id))?;
             if let Some(g) = expected_gen {
@@ -1088,6 +1150,10 @@ impl WorkGraph {
     /// the holder chose to stop before the lease ran out. Only the holder may
     /// do it. A zero actor is refused; [`WorkGraph::release_forced`] is the
     /// explicit way to hand back a claim for nobody.
+    ///
+    /// A node prune dropped after it finished is held by nobody already, so
+    /// releasing it succeeds, changes nothing, and answers generation 0;
+    /// [`WorkGraph::pruned`] says which status it finished with.
     pub fn release(&mut self, id: WorkId, actor: WorkId) -> Result<u64, String> {
         if actor.is_zero() {
             return Err(self.no_actor("release", id));
@@ -1109,6 +1175,9 @@ impl WorkGraph {
         actor: WorkId,
         forced: bool,
     ) -> Result<(u64, WorkId), String> {
+        if self.pruned(id).is_some() {
+            return Ok((0, WorkId::ZERO));
+        }
         let node = self
             .nodes
             .get_mut(&id)
@@ -1197,6 +1266,11 @@ impl WorkGraph {
     /// refused. `None` skips the check. A zero actor is refused;
     /// [`WorkGraph::complete_forced`] is the explicit way to finish a node
     /// for nobody.
+    ///
+    /// A node prune dropped after it finished is as finished as it gets, so
+    /// completing it again succeeds and changes nothing, as it does for a
+    /// terminal node still in the graph; [`WorkGraph::pruned`] says which
+    /// status it finished with.
     pub fn complete(
         &mut self,
         id: WorkId,
@@ -1239,6 +1313,9 @@ impl WorkGraph {
         }
         if id.is_zero() {
             return Err("complete: zero id".into());
+        }
+        if self.pruned(id).is_some() {
+            return Ok(WorkId::ZERO);
         }
         let now = Self::now();
         let node = self
@@ -1409,6 +1486,9 @@ impl WorkGraph {
                     ledger: VecDeque::new(),
                     next_seq,
                     mint_seq,
+                    pruned_path: Some(dir.join(PRUNED_FILE)),
+                    pruned_log: std::sync::OnceLock::new(),
+                    dropped: Vec::new(),
                 };
                 for node in nodes {
                     g.nodes.insert(node.id, node);
@@ -1419,9 +1499,48 @@ impl WorkGraph {
         }
     }
 
-    /// Atomic replace of `$dir/work.bin` (unpacked Cap'n).
+    /// Atomic replace of `$dir/work.bin` (unpacked Cap'n), then the nodes
+    /// prune dropped onto `pruned.log`.
     pub fn save_dir(&self, dir: &Path) -> Result<(), String> {
-        crate::snap::write_bin(dir, self.next_seq, self.mint_seq, &self.list())
+        crate::snap::write_bin(dir, self.next_seq, self.mint_seq, &self.list())?;
+        if !self.dropped.is_empty() {
+            // Best effort: a list that is lost or behind only makes a dropped
+            // node answer as one never seen, which is no reason to fail a
+            // save that has already happened.
+            self.write_pruned(dir).ok();
+        }
+        Ok(())
+    }
+
+    /// Append what this graph dropped, since a rewrite adds about 0.3 ms to
+    /// a writing call and an append nothing measurable
+    /// (measurements/node-cap.org). Past twice [`MAX_PRUNED`] lines the file
+    /// is rewritten to the newest [`MAX_PRUNED`], so a rewrite comes once in
+    /// that many drops and the file never holds more than twice the list.
+    fn write_pruned(&self, dir: &Path) -> std::io::Result<()> {
+        use std::io::Write;
+        let fresh: Vec<String> = self
+            .dropped
+            .iter()
+            .map(|(id, status)| format!("{} {}\n", id.to_hex(), status.as_str()))
+            .collect();
+        let path = dir.join(PRUNED_FILE);
+        let named = std::fs::read_to_string(&path).unwrap_or_default();
+        let every: Vec<&str> = named
+            .lines()
+            .chain(fresh.iter().map(|line| line.trim_end()))
+            .collect();
+        if every.len() <= 2 * MAX_PRUNED {
+            return std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)?
+                .write_all(fresh.concat().as_bytes());
+        }
+        let kept = every[every.len() - MAX_PRUNED..].join("\n") + "\n";
+        let tmp = dir.join("pruned.log.tmp");
+        std::fs::write(&tmp, kept)?;
+        std::fs::rename(tmp, path)
     }
 }
 
