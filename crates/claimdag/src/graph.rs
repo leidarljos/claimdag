@@ -897,10 +897,14 @@ impl WorkGraph {
             .min()
             .unwrap_or(2);
 
-        let candidates: Vec<&WorkNode> = band_0
+        // Sorted because `nodes` is a HashMap, whose order differs in every
+        // process: the probes below index into this list, and the same
+        // worker on the same graph has to land on the same two nodes.
+        let mut candidates: Vec<&WorkNode> = band_0
             .into_iter()
             .filter(|n| role_affinity_tier(n.role, role) == min_tier)
             .collect();
+        candidates.sort_by_key(|n| n.id);
 
         if candidates.len() == 1 {
             return Some(candidates[0]);
