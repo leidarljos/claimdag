@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use claimdag::{Absent, WorkGraph, WorkId, WorkNode, WorkRole, WorkStatus};
+use claimdag::{Absent, WorkFields, WorkGraph, WorkId, WorkKind, WorkNode, WorkRole, WorkStatus};
 use rmcp::{
     handler::server::tool::IntoCallToolResult, handler::server::wrapper::Json,
     handler::server::wrapper::Parameters, handler::server::ServerHandler, model::*, prompt_handler,
@@ -43,6 +43,28 @@ pub struct NodeRow {
     pub waiting_below: u32,
 }
 
+/// A node the graph holds, or the status prune kept after dropping it.
+///
+/// The two answers share no extra flag. A row has the fields a live node
+/// carries. A pruned node is only its id and the status it finished with.
+#[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum ReadNode {
+    /// The graph still holds this node.
+    Row(NodeRow),
+    /// Prune dropped it.
+    Pruned(PrunedNode),
+}
+
+/// The status a node finished with before prune dropped it.
+#[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
+pub struct PrunedNode {
+    /// 32 hex characters.
+    pub id: String,
+    /// `done`, `failed` or `cancelled`.
+    pub status: String,
+}
+
 /// What a claim gave out.
 #[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
 pub struct ClaimRow {
@@ -65,6 +87,17 @@ fn row(node: &WorkNode, now: u64, waiting_below: u32) -> NodeRow {
         quiet_seconds: held.then(|| now.saturating_sub(node.updated_unix)),
         waiting_below,
     }
+}
+
+fn shown(graph: &WorkGraph, id: WorkId) -> Result<NodeRow, Fail> {
+    let node = graph.get(id).ok_or_else(|| {
+        bad(format!(
+            "get: unknown id {}. claimdag list --all",
+            id.to_hex()
+        ))
+    })?;
+    let below = graph.critical_depth().get(&node.id).copied().unwrap_or(0);
+    Ok(row(node, now_unix(), below))
 }
 
 fn now_unix() -> u64 {
@@ -452,6 +485,157 @@ impl ClaimdagServer {
         }
         Ok(Json(handed.iter().map(|id| id.to_hex()).collect()))
     }
+
+    #[tool(
+        description = "One node by its id. Returns the row the graph holds, or the status prune kept when it dropped the node. An id the graph never held is refused, which is a different answer from a node that finished and was dropped.",
+        annotations(
+            title = "Read one node",
+            read_only_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn claimdag_get(
+        &self,
+        Parameters(args): Parameters<GetArgs>,
+    ) -> Result<Json<ReadNode>, Fail> {
+        let id = parse(&args.id)?;
+        let graph = self.reading()?;
+        if graph.get(id).is_some() {
+            return Ok(Json(ReadNode::Row(shown(&graph, id)?)));
+        }
+        if let Some(was) = graph.pruned(id) {
+            return Ok(Json(ReadNode::Pruned(PrunedNode {
+                id: id.to_hex(),
+                status: was.as_str().to_string(),
+            })));
+        }
+        Err(bad(format!(
+            "get: unknown id {}. claimdag list --all",
+            id.to_hex()
+        )))
+    }
+
+    // Minting with no id is a new node on every call, so repeating it is not
+    // the same write.
+    #[tool(
+        description = "Create a node, or change the summary, kind, role or parent of one. Omit the id to mint one. Omit the status and the node keeps the status it has, so a blocked node stays blocked; readiness still follows the dependencies. Returns the row.",
+        annotations(
+            title = "Create or update a node",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn claimdag_upsert(
+        &self,
+        Parameters(args): Parameters<UpsertArgs>,
+    ) -> Result<Json<NodeRow>, Fail> {
+        let id = match args.id.as_deref() {
+            None => WorkId::ZERO,
+            Some(raw) => parse(raw)?,
+        };
+        let actor = parse(&args.actor)?;
+        let summary = args.summary.unwrap_or_default();
+        let parent = match args.parent.as_deref() {
+            None => WorkId::ZERO,
+            Some(raw) => parse(raw)?,
+        };
+        let kind = match args.kind.as_deref() {
+            None => None,
+            Some(raw) => {
+                Some(WorkKind::parse_str(raw).ok_or_else(|| invalid(format!("bad kind {raw}")))?)
+            }
+        };
+        let role = match args.role.as_deref() {
+            None => WorkRole::Unset,
+            Some(raw) => {
+                WorkRole::parse_str(raw).ok_or_else(|| invalid(format!("bad role {raw}")))?
+            }
+        };
+        let status = match args.status.as_deref() {
+            None => None,
+            Some(raw) => Some(
+                WorkStatus::parse_str(raw).ok_or_else(|| invalid(format!("bad status {raw}")))?,
+            ),
+        };
+        let _lock = claimdag::lock_dir(&self.dir).map_err(bad)?;
+        let mut graph = self.writing()?;
+        let present = graph.get(id).map(|node| node.status);
+        // Omitting status keeps the node's status. A minted node has none yet,
+        // and todo is the status a node is created with; the dependencies then
+        // decide whether it is ready. Unset kind leaves a stored kind alone,
+        // and a new node is a task, the command line's default.
+        let status = status.unwrap_or_else(|| present.unwrap_or(WorkStatus::Todo));
+        let kind = kind.unwrap_or(if present.is_some() {
+            WorkKind::Unset
+        } else {
+            WorkKind::Task
+        });
+        let id = graph
+            .upsert(
+                id,
+                WorkFields {
+                    kind,
+                    status,
+                    role,
+                    parent,
+                    actor,
+                    summary: &summary,
+                },
+            )
+            .map_err(bad)?;
+        graph.save_dir(&self.dir).map_err(bad)?;
+        Ok(Json(shown(&graph, id)?))
+    }
+
+    #[tool(
+        description = "Record that the parent finishes before the child. The child waits until the parent is done. Returns the child. Refused when either id is missing or the edge would make a cycle.",
+        annotations(
+            title = "Depend on a node",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn claimdag_link(
+        &self,
+        Parameters(args): Parameters<EdgeArgs>,
+    ) -> Result<Json<NodeRow>, Fail> {
+        let parent = parse(&args.parent)?;
+        let child = parse(&args.child)?;
+        let actor = parse(&args.actor)?;
+        let _lock = claimdag::lock_dir(&self.dir).map_err(bad)?;
+        let mut graph = self.writing()?;
+        graph.link_dep(parent, child, actor).map_err(bad)?;
+        graph.save_dir(&self.dir).map_err(bad)?;
+        Ok(Json(shown(&graph, child)?))
+    }
+
+    #[tool(
+        description = "Drop the dependency from parent to child. An edge that is not there is left as it is. Returns the child.",
+        annotations(
+            title = "Drop a dependency",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn claimdag_unlink(
+        &self,
+        Parameters(args): Parameters<EdgeArgs>,
+    ) -> Result<Json<NodeRow>, Fail> {
+        let parent = parse(&args.parent)?;
+        let child = parse(&args.child)?;
+        let actor = parse(&args.actor)?;
+        let _lock = claimdag::lock_dir(&self.dir).map_err(bad)?;
+        let mut graph = self.writing()?;
+        graph.unlink_dep(parent, child, actor).map_err(bad)?;
+        graph.save_dir(&self.dir).map_err(bad)?;
+        Ok(Json(shown(&graph, child)?))
+    }
 }
 
 #[tool_handler]
@@ -506,8 +690,8 @@ mod tests {
         id
     }
 
-    /// Every tool says what it does, and the three that write say whether they
-    /// are destructive and whether repeating them changes anything more.
+    /// Every tool says what it does, and each one that writes says whether it
+    /// is destructive and whether repeating it changes anything more.
     #[test]
     fn every_tool_says_what_it_does_to_the_graph() {
         let tools = ClaimdagServer::tool_router().list_all();
@@ -536,10 +720,13 @@ mod tests {
                 "claimdag_claim".to_string(),
                 "claimdag_claim_next".to_string(),
                 "claimdag_complete".to_string(),
+                "claimdag_link".to_string(),
                 "claimdag_reclaim".to_string(),
                 "claimdag_release".to_string(),
                 "claimdag_renew".to_string(),
                 "claimdag_reopen".to_string(),
+                "claimdag_unlink".to_string(),
+                "claimdag_upsert".to_string(),
             ]
         );
     }

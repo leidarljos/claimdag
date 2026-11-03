@@ -122,3 +122,49 @@ pub struct ReclaimArgs {
     /// Seconds of silence a claim is allowed.
     pub lease_seconds: u64,
 }
+
+/// One node to read.
+#[derive(Deserialize, JsonSchema)]
+pub struct GetArgs {
+    /// The node, 32 hex characters.
+    pub id: String,
+}
+
+/// Create a node, or change one that is already there.
+#[derive(Deserialize, JsonSchema)]
+pub struct UpsertArgs {
+    /// The node, 32 hex characters. Omit it to mint one.
+    #[serde(default)]
+    pub id: Option<String>,
+    /// What the work is. Omit it and an existing summary stays.
+    #[serde(default)]
+    pub summary: Option<String>,
+    /// `goal`, `step`, `task`, `molecule` or `unset`. Omit it and a stored
+    /// kind stays; a new node is a task.
+    #[serde(default)]
+    pub kind: Option<String>,
+    /// `explore`, `architect`, `implementor`, `verifier`, `orchestrator`,
+    /// `general` or `unset`. Omit it and a stored role stays.
+    #[serde(default)]
+    pub role: Option<String>,
+    /// The node this one hangs under, 32 hex characters. Omit it to leave the
+    /// parent as it is.
+    #[serde(default)]
+    pub parent: Option<String>,
+    /// `todo`, `ready` or `blocked`. Omit it and the node keeps its status.
+    #[serde(default)]
+    pub status: Option<String>,
+    /// Who is asking, 32 hex characters.
+    pub actor: String,
+}
+
+/// A dependency edge: the parent finishes before the child.
+#[derive(Deserialize, JsonSchema)]
+pub struct EdgeArgs {
+    /// The node that has to finish first, 32 hex characters.
+    pub parent: String,
+    /// The node that waits, 32 hex characters.
+    pub child: String,
+    /// Who is asking, 32 hex characters.
+    pub actor: String,
+}

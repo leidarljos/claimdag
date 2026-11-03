@@ -64,6 +64,8 @@ const TOOLS: &[&str] = &[
     "claimdag_claim",
     "claimdag_claim_next",
     "claimdag_complete",
+    "claimdag_get",
+    "claimdag_link",
     "claimdag_list",
     "claimdag_ready",
     "claimdag_ready_balanced",
@@ -71,6 +73,8 @@ const TOOLS: &[&str] = &[
     "claimdag_release",
     "claimdag_renew",
     "claimdag_reopen",
+    "claimdag_unlink",
+    "claimdag_upsert",
 ];
 
 fn parse(raw: &str) -> Value {
@@ -140,6 +144,9 @@ fn input_fields(tool: &str) -> &'static [&'static str] {
         "claimdag_ready" => &[],
         "claimdag_ready_balanced" => &["assignee", "balanced", "role", "slack"],
         "claimdag_list" => &["all"],
+        "claimdag_get" => &["id"],
+        "claimdag_upsert" => &["actor", "id", "kind", "parent", "role", "status", "summary"],
+        "claimdag_link" | "claimdag_unlink" => &["actor", "child", "parent"],
         "claimdag_claim" => &["assignee", "generation", "id"],
         "claimdag_claim_next" => &["assignee", "role", "slack"],
         "claimdag_renew" | "claimdag_release" | "claimdag_reopen" => &["actor", "id"],
@@ -151,9 +158,14 @@ fn input_fields(tool: &str) -> &'static [&'static str] {
 
 fn output_fields(tool: &str) -> &'static [&'static str] {
     match tool {
-        "claimdag_ready" | "claimdag_ready_balanced" | "claimdag_list" | "claimdag_complete" => {
-            NODE_FIELDS
-        }
+        "claimdag_ready"
+        | "claimdag_ready_balanced"
+        | "claimdag_list"
+        | "claimdag_complete"
+        | "claimdag_get"
+        | "claimdag_upsert"
+        | "claimdag_link"
+        | "claimdag_unlink" => NODE_FIELDS,
         "claimdag_claim"
         | "claimdag_claim_next"
         | "claimdag_renew"
@@ -803,5 +815,113 @@ fn every_tool_returns_an_answer_and_an_error() {
             held: false,
             waiting_below: 1,
         },
+    );
+}
+
+/// Two steps over the protocol: the second stays unclaimable until the first
+/// is done, and get reads that one node back.
+#[test]
+fn an_agent_can_add_a_chain_and_read_one_node() {
+    let dir = tempfile::tempdir().expect("scratch dir");
+    let mut seat = Seat::start(dir.path());
+    seat.handshake();
+
+    let actor = WRITER;
+    let a = seat.answer(
+        "claimdag_upsert",
+        &format!(r#"{{"summary":"A","actor":"{actor}"}}"#),
+    );
+    let b = seat.answer(
+        "claimdag_upsert",
+        &format!(r#"{{"summary":"B","actor":"{actor}"}}"#),
+    );
+    let id_a = id_of(&a).to_string();
+    let id_b = id_of(&b).to_string();
+    assert_eq!(text(field(&a, "status")), "ready");
+    assert_eq!(text(field(&b, "status")), "ready");
+
+    let linked = seat.answer(
+        "claimdag_link",
+        &format!(r#"{{"parent":"{id_a}","child":"{id_b}","actor":"{actor}"}}"#),
+    );
+    assert_eq!(id_of(&linked), id_b);
+    assert_eq!(text(field(&linked, "status")), "todo");
+    assert_eq!(
+        items(field(&linked, "blocked_by"))
+            .iter()
+            .map(text)
+            .collect::<Vec<_>>(),
+        [id_a.as_str()]
+    );
+
+    let ready = seat.rows("claimdag_ready", "{}");
+    assert_eq!(ids(&ready), [id_a.as_str()]);
+
+    // Naming blocked, then editing the summary with no status, leaves it
+    // blocked while A is unfinished. A default of todo would have cleared that.
+    let blocked = seat.answer(
+        "claimdag_upsert",
+        &format!(r#"{{"id":"{id_b}","status":"blocked","actor":"{actor}"}}"#),
+    );
+    assert_eq!(text(field(&blocked, "status")), "blocked");
+    let kept = seat.answer(
+        "claimdag_upsert",
+        &format!(r#"{{"id":"{id_b}","summary":"B holds","actor":"{actor}"}}"#),
+    );
+    assert_eq!(text(field(&kept, "status")), "blocked");
+    assert_eq!(text(field(&kept, "summary")), "B holds");
+    let ready = seat.rows("claimdag_ready", "{}");
+    assert_eq!(ids(&ready), [id_a.as_str()]);
+
+    let taken = seat.answer(
+        "claimdag_claim",
+        &format!(r#"{{"id":"{id_a}","assignee":"{actor}"}}"#),
+    );
+    let generation = num(field(&taken, "generation"));
+    seat.answer(
+        "claimdag_complete",
+        &format!(r#"{{"id":"{id_a}","actor":"{actor}","generation":{generation}}}"#),
+    );
+
+    let ready = seat.rows("claimdag_ready", "{}");
+    assert_eq!(ids(&ready), [id_b.as_str()]);
+    let got = seat.answer("claimdag_get", &format!(r#"{{"id":"{id_b}"}}"#));
+    assert_node(
+        &got,
+        Expect {
+            id: &id_b,
+            status: "ready",
+            summary: "B holds",
+            assignee: None,
+            generation: 1,
+            blocked_by: &[&id_a],
+            held: false,
+            waiting_below: 0,
+        },
+    );
+
+    let unlinked = seat.answer(
+        "claimdag_unlink",
+        &format!(r#"{{"parent":"{id_a}","child":"{id_b}","actor":"{actor}"}}"#),
+    );
+    assert_eq!(id_of(&unlinked), id_b);
+    assert_eq!(text(field(&unlinked, "status")), "ready");
+    assert!(
+        items(field(&unlinked, "blocked_by")).is_empty(),
+        "{unlinked}"
+    );
+
+    // A node prune dropped is that status. An id never stored is not.
+    let gone = "00000000000000090000000000000009";
+    std::fs::write(dir.path().join("pruned.log"), format!("{gone} failed\n")).expect("pruned log");
+    let pruned = seat.answer("claimdag_get", &format!(r#"{{"id":"{gone}"}}"#));
+    assert_keys(&pruned, &["id", "status"]);
+    assert_eq!(text(field(&pruned, "id")), gone);
+    assert_eq!(text(field(&pruned, "status")), "failed");
+    let never = "000000000000000a000000000000000a";
+    seat.refused(
+        "claimdag_get",
+        &format!(r#"{{"id":"{never}"}}"#),
+        &format!("get: unknown id {never}"),
     );
 }
