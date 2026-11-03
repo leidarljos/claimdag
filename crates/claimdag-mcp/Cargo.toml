@@ -3,7 +3,10 @@ name = "claimdag-mcp"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-rust-version.workspace = true
+# `cargo +1.87 check -p claimdag-mcp --all-targets` fails: rmcp 3.3.0
+# requires rustc 1.88. `cargo +1.88 check -p claimdag-mcp --all-targets`
+# passes on rustc 1.88.0 (6b00bc388, 2025-06-23).
+rust-version = "1.88"
 description = "Model Context Protocol server over a claim graph: what is claimable, who holds what, and the lease on it"
 repository.workspace = true
 homepage.workspace = true

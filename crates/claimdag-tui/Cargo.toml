@@ -2,7 +2,10 @@
 name = "claimdag-tui"
 version.workspace = true
 edition.workspace = true
-rust-version.workspace = true
+# `cargo +1.87 check -p claimdag-tui --all-targets` fails: ratatui 0.30.2
+# and time 0.3.55 require rustc 1.88. `cargo +1.88 check -p claimdag-tui
+# --all-targets` passes on rustc 1.88.0 (6b00bc388, 2025-06-23).
+rust-version = "1.88"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true

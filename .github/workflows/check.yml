@@ -32,6 +32,60 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
 
+  # Each manifest's rust-version is the oldest rustc that still checks
+  # that crate. The version is read from the manifest, so a binary put
+  # back on 1.85 runs `cargo +1.85 check` and fails on the dependency
+  # floor. A later dependency that needs a newer rustc fails the same way.
+  msrv:
+    name: cargo +MSRV check -p CRATE --all-targets
+    runs-on: ubuntu-latest
+    # Two cold checks, one per declared floor. The rust job's 20 minutes
+    # also runs the suite; 30 leaves room for the second toolchain.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      # rustup is not on the runner. 1.85 is the workspace floor; the
+      # next step installs whatever version each manifest declares.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.85
+      - name: cargo +MSRV check -p CRATE --all-targets
+        run: |
+          set -euo pipefail
+
+          # Print the rust-version literal. A `workspace = true` line
+          # follows [workspace.package] in the root Cargo.toml.
+          rust_version() {
+            local manifest=$1
+            local line ver
+            line=$(grep -m 1 -E '^rust-version([[:space:]]|\.)' "$manifest" || true)
+            if [[ "$line" == *'.workspace = true'* ]]; then
+              line=$(grep -m 1 -E '^rust-version[[:space:]]*=' Cargo.toml || true)
+            fi
+            ver=$(printf '%s\n' "$line" | sed -n 's/^rust-version *= *"\([^"]*\)".*/\1/p')
+            if [[ -z "$ver" ]]; then
+              echo "could not read rust-version from $manifest" >&2
+              return 1
+            fi
+            printf '%s\n' "$ver"
+          }
+
+          installed=" "
+          while read -r crate manifest; do
+            ver=$(rust_version "$manifest")
+            if [[ "$installed" != *" $ver "* ]]; then
+              rustup toolchain install "$ver" --profile minimal --no-self-update
+              installed+="$ver "
+            fi
+            echo "cargo +${ver} check -p ${crate} --all-targets"
+            cargo +"$ver" check -p "$crate" --all-targets
+          done <<'EOF'
+          claimdag crates/claimdag/Cargo.toml
+          claimdag-cli crates/claimdag-cli/Cargo.toml
+          claimdag-mcp crates/claimdag-mcp/Cargo.toml
+          claimdag-tui crates/claimdag-tui/Cargo.toml
+          EOF
+
   front-ends:
     runs-on: ubuntu-latest
     timeout-minutes: 20

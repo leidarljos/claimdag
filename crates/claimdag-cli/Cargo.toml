@@ -2,7 +2,9 @@
 name = "claimdag-cli"
 version.workspace = true
 edition.workspace = true
-rust-version.workspace = true
+# `cargo +1.85 check -p claimdag-cli --all-targets` passes on rustc 1.85.1
+# (4eb161250, 2025-03-15). Its dependencies do not raise the floor.
+rust-version = "1.85"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true

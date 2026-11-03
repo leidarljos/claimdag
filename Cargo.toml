@@ -12,6 +12,8 @@ members = [
 # blocks; `cog -r @cogfiles.txt` rewrites them from this line.
 version = "0.8.0"
 edition = "2021"
+# `cargo +1.85 check -p claimdag --all-targets` passes on rustc 1.85.1
+# (4eb161250, 2025-03-15). claimdag-mcp and claimdag-tui set their own.
 rust-version = "1.85"
 license = "Apache-2.0 OR MIT"
 repository = "https://github.com/leidarljos/claimdag"
