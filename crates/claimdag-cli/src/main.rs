@@ -193,11 +193,51 @@ enum Cmd {
     },
 }
 
-fn parse_id(s: &str) -> Result<WorkId, String> {
-    // WorkId is two u64s printed as hex, 16 characters each. `list --all`
-    // is the inventory of ids that are in the graph.
-    WorkId::from_hex(s)
-        .ok_or_else(|| format!("unknown id {s}: an id is 32 hex characters. claimdag list --all"))
+/// Characters in a work id. `WorkId` is two `u64`s, printed as 16 hex
+/// characters each, and `WorkId::from_hex` accepts that width only.
+const ID_HEX_CHARS: usize = 16 + 16;
+
+fn parse_id(s: &str, g: &WorkGraph) -> Result<WorkId, String> {
+    if let Some(id) = WorkId::from_hex(s) {
+        return Ok(id);
+    }
+    // Not an id the graph could hold. "unknown" is a well-formed id that
+    // is absent, so a short or non-hex paste must not use that word.
+    // The count is characters, the same count as the width in the message.
+    // A byte length would disagree once the text is not ASCII.
+    let n = s.chars().count();
+    let mut msg = format!("bad id {s}: an id is {ID_HEX_CHARS} hex characters, this is {n}");
+    if let Some(full) = unique_hex_prefix(g, s) {
+        msg.push_str(&format!(". did you mean {full}"));
+    }
+    Err(msg)
+}
+
+/// The one node id that `s` prefixes, when `s` is hex and exactly one node matches.
+///
+/// The caller still refuses the verb. A prefix is a hint, not an id to act on.
+fn unique_hex_prefix(g: &WorkGraph, s: &str) -> Option<String> {
+    // Empty is a prefix of every id, and a string as long as an id that
+    // failed `from_hex` is not a prefix of one. Only a shorter hex string can be.
+    if s.is_empty()
+        || s.chars().count() >= ID_HEX_CHARS
+        || !s.chars().all(|c| c.is_ascii_hexdigit())
+    {
+        return None;
+    }
+    let needle = s.to_ascii_lowercase();
+    let mut found: Option<String> = None;
+    for node in g.list() {
+        let hex = node.id.to_hex();
+        if !hex.starts_with(&needle) {
+            continue;
+        }
+        if found.is_some() {
+            return None;
+        }
+        found = Some(hex);
+    }
+    found
 }
 
 fn print_list_json(nodes: &[&WorkNode]) -> Result<(), String> {
@@ -396,7 +436,7 @@ fn run() -> Result<(), String> {
             }
         }
         Cmd::Get { id } => {
-            let id = parse_id(&id)?;
+            let id = parse_id(&id, &g)?;
             let n = g
                 .get(id)
                 .ok_or_else(|| format!("get: unknown id {}. claimdag list --all", id.to_hex()))?;
@@ -412,15 +452,15 @@ fn run() -> Result<(), String> {
             actor,
         } => {
             let wid = match id {
-                Some(s) => parse_id(&s)?,
+                Some(s) => parse_id(&s, &g)?,
                 None => WorkId::ZERO,
             };
             let kind = WorkKind::parse_str(&kind).ok_or_else(|| format!("bad kind {kind}"))?;
             let status =
                 WorkStatus::parse_str(&status).ok_or_else(|| format!("bad status {status}"))?;
             let role = WorkRole::parse_str(&role).ok_or_else(|| format!("bad role {role}"))?;
-            let parent = parse_id(&parent)?;
-            let actor = parse_id(&actor)?;
+            let parent = parse_id(&parent, &g)?;
+            let actor = parse_id(&actor, &g)?;
             let out = g.upsert(
                 wid,
                 WorkFields {
@@ -440,7 +480,9 @@ fn run() -> Result<(), String> {
                 None | Some(0) => None,
                 Some(g) => Some(g),
             };
-            let cas = g.claim(parse_id(&id)?, parse_id(&assignee)?, expected)?;
+            let id = parse_id(&id, &g)?;
+            let assignee = parse_id(&assignee, &g)?;
+            let cas = g.claim(id, assignee, expected)?;
             g.save_dir(&dir)?;
             println!("gen={cas}");
         }
@@ -452,7 +494,7 @@ fn run() -> Result<(), String> {
             json,
         } => {
             let role = WorkRole::parse_str(&role).ok_or_else(|| format!("bad role {role}"))?;
-            let assignee = parse_id(&assignee)?;
+            let assignee = parse_id(&assignee, &g)?;
             let nodes = if balanced || role != WorkRole::Unset || !assignee.is_zero() {
                 g.ready_view_balanced(role, assignee, slack)
             } else {
@@ -471,7 +513,7 @@ fn run() -> Result<(), String> {
             role,
             slack,
         } => {
-            let assignee = parse_id(&assignee)?;
+            let assignee = parse_id(&assignee, &g)?;
             let role = WorkRole::parse_str(&role).ok_or_else(|| format!("bad role {role}"))?;
             let (id, cas) = g.claim_next(assignee, role, slack)?;
             g.save_dir(&dir)?;
@@ -487,10 +529,11 @@ fn run() -> Result<(), String> {
         } => {
             let status =
                 WorkStatus::parse_str(&status).ok_or_else(|| format!("bad status {status}"))?;
-            let id = parse_id(&id)?;
+            let id = parse_id(&id, &g)?;
             match actor {
                 Some(actor) if !force => {
-                    g.complete(id, status, &summary, parse_id(&actor)?, gen)?;
+                    let actor = parse_id(&actor, &g)?;
+                    g.complete(id, status, &summary, actor, gen)?;
                     g.save_dir(&dir)?;
                 }
                 None if !force => return g.complete(id, status, &summary, WorkId::ZERO, gen),
@@ -506,16 +549,18 @@ fn run() -> Result<(), String> {
             }
         }
         Cmd::Renew { id, actor } => {
-            let id = parse_id(&id)?;
-            let cas = g.renew(id, parse_id(&actor)?)?;
+            let id = parse_id(&id, &g)?;
+            let actor = parse_id(&actor, &g)?;
+            let cas = g.renew(id, actor)?;
             g.save_dir(&dir)?;
             println!("gen={cas}");
         }
         Cmd::Release { id, actor, force } => {
-            let id = parse_id(&id)?;
+            let id = parse_id(&id, &g)?;
             let cas = match actor {
                 Some(actor) if !force => {
-                    let cas = g.release(id, parse_id(&actor)?)?;
+                    let actor = parse_id(&actor, &g)?;
+                    let cas = g.release(id, actor)?;
                     g.save_dir(&dir)?;
                     cas
                 }
@@ -533,8 +578,9 @@ fn run() -> Result<(), String> {
             }
         }
         Cmd::Reopen { id, actor } => {
-            let id = parse_id(&id)?;
-            let cas = g.reopen(id, parse_id(&actor)?)?;
+            let id = parse_id(&id, &g)?;
+            let actor = parse_id(&actor, &g)?;
+            let cas = g.reopen(id, actor)?;
             g.save_dir(&dir)?;
             println!("gen={cas}");
         }
@@ -555,9 +601,10 @@ fn run() -> Result<(), String> {
             child,
             actor,
         } => {
-            let parent = parse_id(&parent)?;
-            let child = parse_id(&child)?;
-            g.link_dep(parent, child, parse_id(&actor)?)?;
+            let parent = parse_id(&parent, &g)?;
+            let child = parse_id(&child, &g)?;
+            let actor = parse_id(&actor, &g)?;
+            g.link_dep(parent, child, actor)?;
             g.save_dir(&dir)?;
             println!("{}  {}", parent.to_hex(), child.to_hex());
         }
@@ -566,21 +613,24 @@ fn run() -> Result<(), String> {
             child,
             actor,
         } => {
-            let parent = parse_id(&parent)?;
-            let child = parse_id(&child)?;
-            g.unlink_dep(parent, child, parse_id(&actor)?)?;
+            let parent = parse_id(&parent, &g)?;
+            let child = parse_id(&child, &g)?;
+            let actor = parse_id(&actor, &g)?;
+            g.unlink_dep(parent, child, actor)?;
             g.save_dir(&dir)?;
             println!("{}  {}", parent.to_hex(), child.to_hex());
         }
         Cmd::Archive { id, actor } => {
-            let id = parse_id(&id)?;
-            g.archive(id, parse_id(&actor)?)?;
+            let id = parse_id(&id, &g)?;
+            let actor = parse_id(&actor, &g)?;
+            g.archive(id, actor)?;
             g.save_dir(&dir)?;
             println!("{}  archived", id.to_hex());
         }
         Cmd::Unarchive { id, actor } => {
-            let id = parse_id(&id)?;
-            g.unarchive(id, parse_id(&actor)?)?;
+            let id = parse_id(&id, &g)?;
+            let actor = parse_id(&actor, &g)?;
+            g.unarchive(id, actor)?;
             g.save_dir(&dir)?;
             println!("{}  live", id.to_hex());
         }

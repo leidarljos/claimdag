@@ -183,7 +183,7 @@ fn unknown_id_names_the_id_and_list() {
     );
     assert_refused(
         &claimdag(dir.path(), &["get", "zz"]),
-        "unknown id zz: an id is 32 hex characters. claimdag list --all",
+        "bad id zz: an id is 32 hex characters, this is 2",
     );
 
     let out = claimdag(dir.path(), &["list", "--all"]);
