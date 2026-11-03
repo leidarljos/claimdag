@@ -1,0 +1,55 @@
+name: changelog
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  towncrier:
+    name: towncrier build --draft
+    runs-on: ubuntu-latest
+    # Install plus two drafts finishes in well under a minute.
+    # Ten minutes is the cap so a stuck pip does not run to the
+    # platform default of six hours.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # towncrier 26.9.0 is the release where `build --draft` exits 1
+      # on a fragment that is not `<issue>.<type>.md` once `ignore` is set.
+      - name: Install towncrier 26.9.0
+        run: python -m pip install --disable-pip-version-check -q 'towncrier==26.9.0'
+      - name: Draft the changelog
+        run: |
+          set -euo pipefail
+          # No Python package carries the version. The workspace package
+          # version is the one the draft is titled with.
+          ver=$(awk -F'"' '$1 == "version = " { print $2; exit }' Cargo.toml)
+          test -n "$ver"
+          towncrier build --draft --version "$ver"
+      - name: A malformed fragment fails the draft
+        run: |
+          set -euo pipefail
+          ver=$(awk -F'"' '$1 == "version = " { print $2; exit }' Cargo.toml)
+          test -n "$ver"
+          work=$(mktemp -d)
+          cp towncrier.toml CHANGELOG.md "$work/"
+          cp -a changelog.d "$work/changelog.d"
+          printf '%s\n' 'This name has no type.' > "$work/changelog.d/not-a-fragment.md"
+          if output=$(towncrier build --draft --version "$ver" --dir "$work" 2>&1); then
+            echo "malformed fragment was accepted" >&2
+            printf '%s\n' "$output" >&2
+            exit 1
+          fi
+          printf '%s\n' "$output"
+          printf '%s\n' "$output" | grep -F 'Invalid news fragment name: not-a-fragment.md'
