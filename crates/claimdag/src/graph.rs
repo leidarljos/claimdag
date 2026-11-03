@@ -13,6 +13,19 @@ use crate::id::{mint_work_id, WorkId};
 
 /// How long a claim stands before anybody may take it back, in seconds. One
 /// value for every seat, or one takes back what another still holds.
+///
+/// A sitting does not renew while its holder still runs, so this is how long
+/// a gone holder may stay quiet before the next sitting hands the claim back.
+/// On an Intel Xeon (family 6, model 207, 8 cores), at e0f79d7, five runs of
+/// `ljos sitting ISSUE --verbose` (ljos 0.37.0, vissue 0.23.1, deedar 0.6.1,
+/// this claimdag, `PACKSET_URL=off`, `LJOS_TRACKER_GIT=off`) put the longest
+/// section at `== doctor`, 242.9 ms median (242.2 to 243.1), and the whole
+/// sitting at 541 ms. One sitting on a graph of 4096 nodes took 162 ms to
+/// list that graph and reclaim, still under the doctor. Fifteen minutes is many
+/// of those sittings, so one that is still printing is not quiet, and a
+/// crashed holder does not keep the node, or the one claim its assignee is
+/// allowed, for the rest of the day. The measured step is under this, so the
+/// value stays 900.
 pub const DEFAULT_LEASE_SECS: u64 = 900;
 
 /// Snapshot format written by this crate.

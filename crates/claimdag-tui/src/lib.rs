@@ -15,6 +15,17 @@ pub use app::{Action, App};
 pub use forest::Row;
 pub use handles::Handles;
 
+/// How long the pane waits for a key before it draws another seat's claim.
+///
+/// A key is read as soon as it arrives. This wait is only the idle refresh.
+/// Nielsen's limits, from Usability Engineering (1993), after Miller (AFIPS
+/// Fall Joint Computer Conference, 1968), are a tenth of a second for a
+/// response that feels instantaneous and one second before the flow of
+/// thought breaks. A quarter of a second sits in that gap, so another seat's
+/// claim shows up inside the flow limit and an idle redraw is slower than
+/// the instantaneous bound.
+const IDLE_POLL: std::time::Duration = std::time::Duration::from_millis(250);
+
 /// Draw the pane until the reader quits.
 ///
 /// # Errors
@@ -26,7 +37,7 @@ pub fn run(dir: std::path::PathBuf) -> std::io::Result<()> {
     let result = (|| {
         loop {
             terminal.draw(|frame| view::draw(frame, &app))?;
-            if ratatui::crossterm::event::poll(std::time::Duration::from_millis(250))? {
+            if ratatui::crossterm::event::poll(IDLE_POLL)? {
                 if let ratatui::crossterm::event::Event::Key(key) =
                     ratatui::crossterm::event::read()?
                 {

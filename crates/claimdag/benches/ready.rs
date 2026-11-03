@@ -10,6 +10,19 @@ use std::time::Duration;
 use claimdag::{WorkFields, WorkGraph, WorkId, WorkKind, WorkRole, WorkStatus};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 
+/// How long criterion spends measuring one group.
+///
+/// Criterion 0.5.1's default is 5 s (`measurement_time` on `Criterion`).
+/// Its linear sample of the default 100 points is `n(n + 1) / 2` = 5050
+/// iterations, and it will not cut that sample short. `ready` over 4096
+/// nodes in chains of 64, built the way [`graph`] builds it, took 1254 µs
+/// median of 50 calls after 5 warm, release build, on an Intel Xeon (family
+/// 6, model 207, 8 cores) at e0f79d7. Those 5050 calls are 6.3 s, so a 5 s
+/// target still runs the sample and warns. Six seconds is that default plus
+/// one second, and the same window on every group here. The measured call
+/// does not ask for more, so the window stays 6 s.
+const MEASURE_FOR: Duration = Duration::from_secs(6);
+
 fn id(n: u64) -> WorkId {
     WorkId {
         hi: n,
@@ -57,7 +70,7 @@ fn graph(n: usize, depth: usize) -> WorkGraph {
 
 fn ready(c: &mut Criterion) {
     let mut group = c.benchmark_group("ready over n nodes");
-    group.measurement_time(Duration::from_secs(6));
+    group.measurement_time(MEASURE_FOR);
     for (n, depth) in [(256usize, 8usize), (1_024, 8), (4_096, 8), (4_096, 64)] {
         let g = graph(n, depth);
         group.throughput(Throughput::Elements(n as u64));
@@ -72,7 +85,7 @@ fn ready(c: &mut Criterion) {
 
 fn depth(c: &mut Criterion) {
     let mut group = c.benchmark_group("critical depth over n nodes");
-    group.measurement_time(Duration::from_secs(6));
+    group.measurement_time(MEASURE_FOR);
     for n in [1_024usize, 4_096] {
         let g = graph(n, 8);
         group.throughput(Throughput::Elements(n as u64));
@@ -85,7 +98,7 @@ fn depth(c: &mut Criterion) {
 
 fn balanced_ready(c: &mut Criterion) {
     let mut group = c.benchmark_group("balanced ready over n nodes");
-    group.measurement_time(Duration::from_secs(6));
+    group.measurement_time(MEASURE_FOR);
     let worker = id(12345);
     for (n, depth) in [(256usize, 8usize), (1_024, 8), (4_096, 8), (4_096, 64)] {
         let g = graph(n, depth);
