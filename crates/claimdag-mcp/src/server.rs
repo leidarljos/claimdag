@@ -210,12 +210,33 @@ impl ClaimdagServer {
     /// from. The lock is taken before the load and held by the caller across
     /// the save. A snapshot that does not parse is refused, never replaced
     /// by an empty graph and saved over.
+    ///
+    /// An unnamed directory is resolved again after the lock is held.
+    /// `claimdag where --move` holds both locks while it moves `work.bin`,
+    /// so a call that resolved the old directory and waited out that move
+    /// would load no snapshot and save a new graph in the empty directory.
+    /// When the defaults now name a different directory, this drops the lock
+    /// and retries there. A named directory is not moved, so it is locked once.
     fn writing(&self) -> Result<(PathBuf, claimdag::lock::Lock, WorkGraph), Fail> {
-        let dir = self.dir();
-        let lock = claimdag::lock_dir(&dir).map_err(bad)?;
-        let graph =
-            WorkGraph::load_for_write(&dir).map_err(|absent: Absent| bad(absent.to_string()))?;
-        Ok((dir, lock, graph))
+        if self.dir.is_some() {
+            let dir = self.dir();
+            let lock = claimdag::lock_dir(&dir).map_err(bad)?;
+            let graph = WorkGraph::load_for_write(&dir)
+                .map_err(|absent: Absent| bad(absent.to_string()))?;
+            return Ok((dir, lock, graph));
+        }
+        loop {
+            let dir = claimdag::locate(None).dir().to_path_buf();
+            let lock = claimdag::lock_dir(&dir).map_err(bad)?;
+            let current = claimdag::locate(None).dir().to_path_buf();
+            if current != dir {
+                drop(lock);
+                continue;
+            }
+            let graph = WorkGraph::load_for_write(&dir)
+                .map_err(|absent: Absent| bad(absent.to_string()))?;
+            return Ok((dir, lock, graph));
+        }
     }
 
     #[tool(

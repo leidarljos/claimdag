@@ -12,7 +12,7 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use claimdag::{WorkFields, WorkGraph, WorkId, WorkKind, WorkRole, WorkStatus};
 use serde_json::Value;
@@ -24,8 +24,16 @@ use serde_json::Value;
 const REPLY_WAIT: Duration = Duration::from_secs(5);
 
 const SUMMARY: &str = "moved with the graph";
+/// A node minted after the move, so the write is one the old directory did
+/// not already hold.
+const ADDED: &str = "written after the move";
 /// A holder that is not the zero id, so the claim is one the graph records.
 const ASSIGNEE: &str = "00000000000000070000000000000007";
+
+/// Both tests park `/tmp/claimdag-UID` and rewrite the process environment.
+/// Cargo runs this file's tests on threads of one process, so without this
+/// one test renames that directory while the other is seeding it.
+static SEAT: Mutex<()> = Mutex::new(());
 
 fn euid() -> u32 {
     let out = Command::new("id").arg("-u").output().expect("id -u");
@@ -288,11 +296,32 @@ impl Seat {
         self.notify("notifications/initialized");
     }
 
-    fn tool(&mut self, name: &str, arguments: &str) -> Value {
-        let msg = self.rpc(
-            "tools/call",
-            &format!(r#"{{"name":"{name}","arguments":{arguments}}}"#),
-        );
+    fn pid(&self) -> u32 {
+        self.child.id()
+    }
+
+    /// Send a tool call and return its id. The reply is read with
+    /// [`Seat::end_tool`], so the test can move the graph while the call waits.
+    fn begin_tool(&mut self, name: &str, arguments: &str) -> i64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.send(&format!(
+            r#"{{"jsonrpc":"2.0","id":{id},"method":"tools/call","params":{{"name":"{name}","arguments":{arguments}}}}}"#
+        ));
+        id
+    }
+
+    fn end_tool(&mut self, id: i64, name: &str) -> Value {
+        let msg = loop {
+            let raw = self.read_line();
+            let msg = parse(&raw);
+            match msg.get("id").and_then(Value::as_i64) {
+                Some(got) if got == id => break msg,
+                Some(_) => panic!("reply for another id while waiting for {id}: {raw}"),
+                None if msg.get("method").is_some() => continue,
+                None => panic!("reply without an id while waiting for {id}: {raw}"),
+            }
+        };
         if let Some(err) = msg.get("error") {
             panic!(
                 "{name} raised {} {}\nstderr: {}",
@@ -303,7 +332,10 @@ impl Seat {
         }
         let result = field(&msg, "result");
         if result.get("isError") == Some(&Value::Bool(true)) {
-            panic!("{name} returned an error\n{msg}");
+            panic!(
+                "{name} returned an error\n{msg}\nstderr: {}",
+                self.stderr_text()
+            );
         }
         let block = &items(field(result, "content"))[0];
         let body = text(field(block, "text"));
@@ -315,6 +347,11 @@ impl Seat {
             );
         }
         parsed
+    }
+
+    fn tool(&mut self, name: &str, arguments: &str) -> Value {
+        let id = self.begin_tool(name, arguments);
+        self.end_tool(id, name)
     }
 
     fn ready(&mut self) -> Vec<Value> {
@@ -342,6 +379,7 @@ impl Drop for Seat {
 /// a claim lands in the new directory. The old directory holds no `work.bin`.
 #[test]
 fn a_server_started_before_a_move_reads_and_writes_the_moved_graph() {
+    let _seat = SEAT.lock().unwrap_or_else(|err| err.into_inner());
     let parked = Parked::uid();
     let root = tempfile::tempdir().expect("private home");
     let home = root.path().join("home");
@@ -390,4 +428,127 @@ fn a_server_started_before_a_move_reads_and_writes_the_moved_graph() {
     assert_eq!(node.summary, SUMMARY);
     assert_eq!(node.assignee.to_hex(), ASSIGNEE);
     assert_eq!(node.status, WorkStatus::Claimed);
+}
+
+fn signal(pid: u32, name: &str) {
+    let status = Command::new("kill")
+        .arg(name)
+        .arg(pid.to_string())
+        .status()
+        .unwrap_or_else(|err| panic!("kill {name} {pid}: {err}"));
+    assert!(status.success(), "kill {name} {pid} exited {status}");
+}
+
+/// `T` is a stopped process, which is what `kill -STOP` produces.
+fn is_stopped(pid: u32) -> bool {
+    let output = Command::new("ps")
+        .args(["-o", "state=", "-p", &pid.to_string()])
+        .output()
+        .unwrap_or_else(|err| panic!("ps {pid}: {err}"));
+    String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .starts_with('T')
+}
+
+/// Whether `pid` has `path` open. The write resolves the directory and then
+/// opens its lock, so an open lock is the resolve having chosen that directory.
+fn has_open(pid: u32, path: &Path) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        let dir = PathBuf::from(format!("/proc/{pid}/fd"));
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            return false;
+        };
+        entries
+            .flatten()
+            .any(|entry| std::fs::read_link(entry.path()).is_ok_and(|target| target == path))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        // `lsof -F n` prints one `n<path>` line per open file. macOS has no
+        // `/proc/<pid>/fd`. A missing lsof is a failed observation, not a pass.
+        let output = Command::new("lsof")
+            .args(["-p", &pid.to_string(), "-F", "n"])
+            .output()
+            .unwrap_or_else(|err| panic!("lsof {pid}: {err}"));
+        let text = String::from_utf8_lossy(&output.stdout);
+        let want = path.to_string_lossy();
+        text.lines()
+            .any(|line| line.strip_prefix('n') == Some(want.as_ref()))
+    }
+}
+
+fn wait_until(pid: u32, what: &str, mut ready: impl FnMut() -> bool) {
+    let deadline = Instant::now() + REPLY_WAIT;
+    while !ready() {
+        if Instant::now() >= deadline {
+            panic!("timed out waiting for {what} on pid {pid}");
+        }
+        thread::yield_now();
+    }
+}
+
+/// Resolve, then `move_graph`, then the write.
+///
+/// The server is stopped once it has opened the old directory's lock, which
+/// is after it resolved that directory and before the lock is held: the test
+/// holds the lock, so the server is waiting. The move runs while the server
+/// is stopped. The write then continues on a directory whose `work.bin` is
+/// already gone. The moved graph gets the new node and the old directory has
+/// no `work.bin`.
+#[test]
+fn a_write_that_resolved_before_the_move_follows_the_graph() {
+    let _seat = SEAT.lock().unwrap_or_else(|err| err.into_inner());
+    let parked = Parked::uid();
+    let root = tempfile::tempdir().expect("private home");
+    let home = root.path().join("home");
+    std::fs::create_dir_all(&home).expect("home");
+    let _env = SeatEnv::private_home(&home);
+
+    let old = parked.path.clone();
+    let new = home.join(".local/state/claimdag");
+    let id = seed(&old);
+
+    let mut server = Seat::start(&home);
+    server.handshake();
+
+    let hold = claimdag::lock_dir(&old).unwrap_or_else(|err| panic!("{err}"));
+    let call = server.begin_tool(
+        "claimdag_upsert",
+        &format!(r#"{{"summary":"{ADDED}","actor":"{ASSIGNEE}"}}"#),
+    );
+    let lock_path = old.join("lock");
+    wait_until(server.pid(), "the old lock to be open", || {
+        has_open(server.pid(), &lock_path)
+    });
+    signal(server.pid(), "-STOP");
+    wait_until(server.pid(), "the server to stop", || {
+        is_stopped(server.pid())
+    });
+    drop(hold);
+
+    let (from, to) = move_default_graph();
+    assert_eq!(from, old, "moved from {from:?}, the graph was at {old:?}");
+    assert_eq!(to, new);
+    signal(server.pid(), "-CONT");
+
+    let row = server.end_tool(call, "claimdag_upsert");
+    assert_eq!(text(field(&row, "summary")), ADDED);
+    let written = WorkId::from_hex(text(field(&row, "id"))).expect("minted id");
+    assert!(
+        !old.join(claimdag::SNAP_BIN).exists(),
+        "write recreated {} in {}",
+        claimdag::SNAP_BIN,
+        old.display()
+    );
+    let graph = WorkGraph::open_dir(&new).unwrap_or_else(|err| panic!("{err}"));
+    assert!(
+        graph.get(id).is_some(),
+        "seeded node left {}",
+        new.display()
+    );
+    let node = graph
+        .get(written)
+        .unwrap_or_else(|| panic!("no {} in {}", written.to_hex(), new.display()));
+    assert_eq!(node.summary, ADDED);
 }
