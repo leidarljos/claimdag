@@ -397,15 +397,37 @@ impl ClaimdagServer {
             )
             .map_err(bad)?;
         graph.save_dir(&self.dir).map_err(bad)?;
-        let now = now_unix();
-        let depth = graph.critical_depth();
-        let node = graph
-            .get(id)
+        if let Some(node) = graph.get(id) {
+            let now = now_unix();
+            let depth = graph.critical_depth();
+            // A finished node has nothing unfinished below it that it is holding
+            // up, which is exactly what the depth of zero says.
+            let below = depth.get(&node.id).copied().unwrap_or(0);
+            return Ok(Json(row(node, now, below)));
+        }
+        // Prune drops a finished node and remembers only the status it
+        // finished with. The command line answers "already terminal and
+        // pruned; nothing changed". This row is that answer, so a retry is
+        // not an error. The node is gone, so the summary, assignee and
+        // dependencies are empty, and it is not held.
+        let was = graph
+            .pruned(id)
             .ok_or_else(|| bad("complete: the node went missing".into()))?;
-        // A finished node has nothing unfinished below it that it is holding
-        // up, which is exactly what the depth of zero says.
-        let below = depth.get(&node.id).copied().unwrap_or(0);
-        Ok(Json(row(node, now, below)))
+        Ok(Json(NodeRow {
+            id: id.to_hex(),
+            status: was.as_str().to_string(),
+            summary: String::new(),
+            assignee: None,
+            // Release of a pruned node answers generation 0: the node is no
+            // longer in the graph, so there is no generation to carry.
+            generation: 0,
+            blocked_by: Vec::new(),
+            quiet_seconds: None,
+            // There is no chain left to measure. A node that
+            // `critical_depth` does not hold is reported as zero on the
+            // live path too.
+            waiting_below: 0,
+        }))
     }
 
     #[tool(
