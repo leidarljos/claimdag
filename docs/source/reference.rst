@@ -261,7 +261,8 @@ Ids are 32 lowercase hex characters (xxHash3-128). The zero id means unset.
 A ``release`` or ``complete`` with no actor still runs, and so does a ``release``,
 ``complete`` or ``renew`` whose actor is not the holder. The line on stderr and
 in ``warn.log`` is ``allow``, ``warn``, and ``no-actor`` or ``not-assignee``, separated
-by tabs. ``--force`` appends to ``forced.log`` instead. A default directory
+by tabs. The server puts that line in the tool result, as a text block
+after the row. ``--force`` appends to ``forced.log`` instead. A default directory
 another user owns is opened the same way, with ``not-owner``.
 
 ``claim`` prints the new generation. ``renew`` moves the lease and keeps that

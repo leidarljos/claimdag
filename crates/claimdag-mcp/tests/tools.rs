@@ -259,6 +259,8 @@ enum Answer {
     Tool {
         is_error: bool,
         text: String,
+        /// Every text block in the tool result, the row first.
+        texts: Vec<String>,
         structured: Option<Value>,
         raw: String,
     },
@@ -421,11 +423,18 @@ impl Seat {
             None => false,
             Some(other) => panic!("isError {other} in {raw}"),
         };
-        let block = &items(field(result, "content"))[0];
-        assert_eq!(text(field(block, "type")), "text", "{raw}");
+        let texts: Vec<String> = items(field(result, "content"))
+            .iter()
+            .map(|block| {
+                assert_eq!(text(field(block, "type")), "text", "{raw}");
+                text(field(block, "text")).to_string()
+            })
+            .collect();
+        assert!(!texts.is_empty(), "{raw}");
         Answer::Tool {
             is_error,
-            text: text(field(block, "text")).to_string(),
+            text: texts[0].clone(),
+            texts,
             structured: result.get("structuredContent").cloned(),
             raw,
         }
@@ -438,6 +447,7 @@ impl Seat {
                 text,
                 structured: Some(value),
                 raw,
+                ..
             } => {
                 assert_eq!(
                     parse(&text),
@@ -458,6 +468,38 @@ impl Seat {
             assert_keys(row, NODE_FIELDS);
         }
         rows
+    }
+
+    /// The call ran. The row is the structured content, and a later text
+    /// block is the warning line.
+    fn labeled(&mut self, name: &str, arguments: &str, rule: &str) -> Value {
+        match self.tool(name, arguments) {
+            Answer::Tool {
+                is_error: false,
+                text,
+                texts,
+                structured: Some(value),
+                raw,
+            } => {
+                assert_eq!(
+                    parse(&text),
+                    value,
+                    "{name}: text and structuredContent differ\n{raw}"
+                );
+                let prefix = format!("allow\twarn\t{rule}\t");
+                assert!(
+                    texts.iter().skip(1).any(|line| line.starts_with(&prefix)),
+                    "{name}: the tool result has no {prefix:?} block\n{texts:?}\n{raw}"
+                );
+                assert!(
+                    !value.to_string().contains("allow\twarn"),
+                    "{name}: the row absorbed the label\n{value}"
+                );
+                value
+            }
+            Answer::Tool { raw, .. } => panic!("{name} returned an error result\n{raw}"),
+            Answer::Rpc { code, message, raw } => panic!("{name} raised {code} {message}\n{raw}"),
+        }
     }
 
     fn tool_err(&mut self, name: &str, arguments: &str, phrase: &str) {
@@ -656,9 +698,10 @@ fn every_tool_returns_an_answer_and_an_error() {
 
     // The spec is held by the reader. The writer still renews it, and the
     // warning names that the actor is not the holder. The generation stays.
-    let renewed_other = seat.answer(
+    let renewed_other = seat.labeled(
         "claimdag_renew",
         &format!(r#"{{"id":"{SPEC}","actor":"{WRITER}"}}"#),
+        "not-assignee",
     );
     assert_claim(&renewed_other, SPEC, 2);
     let warned = std::fs::read_to_string(dir.path().join("warn.log")).expect("warn.log");
@@ -688,9 +731,10 @@ fn every_tool_returns_an_answer_and_an_error() {
 
     // The writer is not the holder. The release still runs, the generation
     // moves, and the warning names both.
-    let released = seat.answer(
+    let released = seat.labeled(
         "claimdag_release",
         &format!(r#"{{"id":"{SPEC}","actor":"{WRITER}"}}"#),
+        "not-assignee",
     );
     assert_claim(&released, SPEC, 3);
     let warned = std::fs::read_to_string(dir.path().join("warn.log")).expect("warn.log");
@@ -933,4 +977,31 @@ fn an_agent_can_add_a_chain_and_read_one_node() {
         &format!(r#"{{"id":"{never}"}}"#),
         &format!("get: unknown id {never}"),
     );
+}
+
+/// A zero actor still finishes the node. The warning is a text block in the
+/// tool result, after the row, and the same line is in `warn.log`.
+#[test]
+fn a_warning_is_a_text_block_in_the_tool_result() {
+    let dir = tempfile::tempdir().expect("scratch dir");
+    let mut seat = Seat::start(dir.path());
+    seat.handshake();
+    let made = seat.answer(
+        "claimdag_upsert",
+        &format!(r#"{{"summary":"held","actor":"{WRITER}"}}"#),
+    );
+    let id = id_of(&made);
+    seat.answer(
+        "claimdag_claim",
+        &format!(r#"{{"id":"{id}","assignee":"{WRITER}"}}"#),
+    );
+    let nobody = "00000000000000000000000000000000";
+    let done = seat.labeled(
+        "claimdag_complete",
+        &format!(r#"{{"id":"{id}","actor":"{nobody}"}}"#),
+        "no-actor",
+    );
+    assert_eq!(text(field(&done, "status")), "done");
+    let log = std::fs::read_to_string(dir.path().join("warn.log")).expect("warn.log");
+    assert!(log.contains("allow\twarn\tno-actor\t"), "{log}");
 }

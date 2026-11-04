@@ -5,9 +5,9 @@ use std::path::PathBuf;
 
 use claimdag::{Absent, WorkFields, WorkGraph, WorkId, WorkKind, WorkNode, WorkRole, WorkStatus};
 use rmcp::{
-    handler::server::tool::IntoCallToolResult, handler::server::wrapper::Json,
-    handler::server::wrapper::Parameters, handler::server::ServerHandler, model::*, prompt_handler,
-    tool, tool_handler, tool_router, ErrorData as McpError,
+    handler::server::tool::IntoCallToolResult, handler::server::wrapper::Parameters,
+    handler::server::ServerHandler, model::*, prompt_handler, tool, tool_handler, tool_router,
+    ErrorData as McpError,
 };
 use serde::Serialize;
 
@@ -108,6 +108,37 @@ fn now_unix() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+/// A tool result: the row, then any warning lines as further text blocks.
+///
+/// The row stays the structured content, so its schema is unchanged. Each
+/// warning is the same `allow`, `warn`, rule line the command line writes,
+/// and it is part of the result a seat reads. Stderr and `warn.log` keep a
+/// copy.
+struct Json<T>(pub T, Vec<String>);
+
+impl<T> Json<T> {
+    fn plain(value: T) -> Self {
+        Self(value, Vec::new())
+    }
+
+    fn noted(value: T, warnings: Vec<String>) -> Self {
+        Self(value, warnings)
+    }
+}
+
+impl<T: Serialize + 'static> IntoCallToolResult for Json<T> {
+    fn into_call_tool_result(self) -> Result<CallToolResponse, McpError> {
+        let value = serde_json::to_value(self.0).map_err(|e| {
+            McpError::internal_error(format!("Failed to serialize structured content: {e}"), None)
+        })?;
+        let mut result = CallToolResult::structured(value);
+        for line in self.1 {
+            result.content.push(ContentBlock::text(line));
+        }
+        Ok(result.into())
+    }
 }
 
 /// Why a tool call did not return a row.
@@ -240,15 +271,17 @@ impl ClaimdagServer {
         }
     }
 
-    /// Save, then record any warning the call produced. The line is on stderr
-    /// and in `warn.log` before the tool result is written, so a seat that
-    /// reads the result can also read the file.
-    fn stored(&self, dir: &std::path::Path, graph: &WorkGraph) -> Result<(), Fail> {
+    /// Save, and return the warnings the call recorded.
+    ///
+    /// Each line is also written to stderr and `warn.log`. The caller puts
+    /// the same lines in the tool result.
+    fn stored(&self, dir: &std::path::Path, graph: &WorkGraph) -> Result<Vec<String>, Fail> {
         graph.save_dir(dir).map_err(bad)?;
-        for line in graph.warnings() {
+        let warnings = graph.warnings().to_vec();
+        for line in &warnings {
             claimdag::emit_warn(dir, line);
         }
-        Ok(())
+        Ok(warnings)
     }
 
     #[tool(
@@ -263,7 +296,7 @@ impl ClaimdagServer {
         let graph = self.reading()?;
         let now = now_unix();
         let depth = graph.critical_depth();
-        Ok(Json(
+        Ok(Json::plain(
             graph
                 .ready_view()
                 .into_iter()
@@ -299,7 +332,7 @@ impl ClaimdagServer {
         } else {
             graph.ready_view()
         };
-        Ok(Json(
+        Ok(Json::plain(
             nodes
                 .into_iter()
                 .map(|n| row(n, now, depth.get(&n.id).copied().unwrap_or(0)))
@@ -323,7 +356,7 @@ impl ClaimdagServer {
         let now = now_unix();
         let all = args.all.unwrap_or(false);
         let depth = graph.critical_depth();
-        Ok(Json(
+        Ok(Json::plain(
             graph
                 .list_view(all, all)
                 .into_iter()
@@ -350,11 +383,14 @@ impl ClaimdagServer {
         let assignee = parse(&args.assignee)?;
         let (dir, _lock, mut graph) = self.writing()?;
         let generation = graph.claim(id, assignee, args.generation).map_err(bad)?;
-        self.stored(&dir, &graph)?;
-        Ok(Json(ClaimRow {
-            id: id.to_hex(),
-            generation,
-        }))
+        let warnings = self.stored(&dir, &graph)?;
+        Ok(Json::noted(
+            ClaimRow {
+                id: id.to_hex(),
+                generation,
+            },
+            warnings,
+        ))
     }
 
     #[tool(
@@ -376,15 +412,18 @@ impl ClaimdagServer {
         let slack = args.slack.unwrap_or(1);
         let (dir, _lock, mut graph) = self.writing()?;
         let (id, generation) = graph.claim_next(assignee, role, slack).map_err(bad)?;
-        self.stored(&dir, &graph)?;
-        Ok(Json(ClaimRow {
-            id: id.to_hex(),
-            generation,
-        }))
+        let warnings = self.stored(&dir, &graph)?;
+        Ok(Json::noted(
+            ClaimRow {
+                id: id.to_hex(),
+                generation,
+            },
+            warnings,
+        ))
     }
 
     #[tool(
-        description = "Say the holder is still working, which moves the lease and leaves the generation alone. A renewal is not a change of ownership, so the token you hold stays good. An actor who is not the holder still moves the lease and records allow, warn, and not-assignee, separated by tabs.",
+        description = "Say the holder is still working, which moves the lease and leaves the generation alone. A renewal is not a change of ownership, so the token you hold stays good. An actor who is not the holder still moves the lease. The tool result then has a text block after the row: allow, warn, and not-assignee, separated by tabs.",
         annotations(
             title = "Renew a lease",
             read_only_hint = false,
@@ -401,15 +440,18 @@ impl ClaimdagServer {
         let actor = parse(&args.actor)?;
         let (dir, _lock, mut graph) = self.writing()?;
         let generation = graph.renew(id, actor).map_err(bad)?;
-        self.stored(&dir, &graph)?;
-        Ok(Json(ClaimRow {
-            id: id.to_hex(),
-            generation,
-        }))
+        let warnings = self.stored(&dir, &graph)?;
+        Ok(Json::noted(
+            ClaimRow {
+                id: id.to_hex(),
+                generation,
+            },
+            warnings,
+        ))
     }
 
     #[tool(
-        description = "Hand one claim back on purpose before the work is terminal: the node is ready again, the assignee clears, and the generation moves so the token you held is fenced. Call this when you stop working on a node without finishing it; until you do, you stay busy and cannot claim anything else. An actor who is not the holder, or the zero id, still hands it back and records allow, warn, and not-assignee or no-actor, separated by tabs.",
+        description = "Hand one claim back on purpose before the work is terminal: the node is ready again, the assignee clears, and the generation moves so the token you held is fenced. Call this when you stop working on a node without finishing it; until you do, you stay busy and cannot claim anything else. An actor who is not the holder, or the zero id, still hands it back. The tool result then has a text block after the row: allow, warn, and not-assignee or no-actor, separated by tabs.",
         annotations(
             title = "Hand a claim back",
             read_only_hint = false,
@@ -426,11 +468,14 @@ impl ClaimdagServer {
         let actor = parse(&args.actor)?;
         let (dir, _lock, mut graph) = self.writing()?;
         let generation = graph.release(id, actor).map_err(bad)?;
-        self.stored(&dir, &graph)?;
-        Ok(Json(ClaimRow {
-            id: id.to_hex(),
-            generation,
-        }))
+        let warnings = self.stored(&dir, &graph)?;
+        Ok(Json::noted(
+            ClaimRow {
+                id: id.to_hex(),
+                generation,
+            },
+            warnings,
+        ))
     }
 
     #[tool(
@@ -451,15 +496,18 @@ impl ClaimdagServer {
         let actor = parse(&args.actor)?;
         let (dir, _lock, mut graph) = self.writing()?;
         let generation = graph.reopen(id, actor).map_err(bad)?;
-        self.stored(&dir, &graph)?;
-        Ok(Json(ClaimRow {
-            id: id.to_hex(),
-            generation,
-        }))
+        let warnings = self.stored(&dir, &graph)?;
+        Ok(Json::noted(
+            ClaimRow {
+                id: id.to_hex(),
+                generation,
+            },
+            warnings,
+        ))
     }
 
     #[tool(
-        description = "Complete a node. Pass the generation claim gave you: without it the complete goes through even if your lease was reclaimed and somebody else has the work. Done is refused while a dependency is unfinished, and the error names it. An actor who is not the holder, or the zero id, still finishes the node and records allow, warn, and not-assignee or no-actor, separated by tabs. Terminal is sticky.",
+        description = "Complete a node. Pass the generation claim gave you: without it the complete goes through even if your lease was reclaimed and somebody else has the work. Done is refused while a dependency is unfinished, and the error names it. An actor who is not the holder, or the zero id, still finishes the node. The tool result then has a text block after the row: allow, warn, and not-assignee or no-actor, separated by tabs. Terminal is sticky.",
         annotations(
             title = "Complete the node",
             read_only_hint = false,
@@ -494,14 +542,14 @@ impl ClaimdagServer {
                 args.generation,
             )
             .map_err(bad)?;
-        self.stored(&dir, &graph)?;
+        let warnings = self.stored(&dir, &graph)?;
         if let Some(node) = graph.get(id) {
             let now = now_unix();
             let depth = graph.critical_depth();
             // A finished node has nothing unfinished below it that it is holding
             // up, which is exactly what the depth of zero says.
             let below = depth.get(&node.id).copied().unwrap_or(0);
-            return Ok(Json(row(node, now, below)));
+            return Ok(Json::noted(row(node, now, below), warnings));
         }
         // Prune drops a finished node and remembers only the status it
         // finished with. The command line answers "already terminal and
@@ -511,21 +559,24 @@ impl ClaimdagServer {
         let was = graph
             .pruned(id)
             .ok_or_else(|| bad("complete: the node went missing".into()))?;
-        Ok(Json(NodeRow {
-            id: id.to_hex(),
-            status: was.as_str().to_string(),
-            summary: String::new(),
-            assignee: None,
-            // Release of a pruned node answers generation 0: the node is no
-            // longer in the graph, so there is no generation to carry.
-            generation: 0,
-            blocked_by: Vec::new(),
-            quiet_seconds: None,
-            // There is no chain left to measure. A node that
-            // `critical_depth` does not hold is reported as zero on the
-            // live path too.
-            waiting_below: 0,
-        }))
+        Ok(Json::noted(
+            NodeRow {
+                id: id.to_hex(),
+                status: was.as_str().to_string(),
+                summary: String::new(),
+                assignee: None,
+                // Release of a pruned node answers generation 0: the node is no
+                // longer in the graph, so there is no generation to carry.
+                generation: 0,
+                blocked_by: Vec::new(),
+                quiet_seconds: None,
+                // There is no chain left to measure. A node that
+                // `critical_depth` does not hold is reported as zero on the
+                // live path too.
+                waiting_below: 0,
+            },
+            warnings,
+        ))
     }
 
     #[tool(
@@ -544,10 +595,15 @@ impl ClaimdagServer {
     ) -> Result<Json<Vec<String>>, Fail> {
         let (dir, _lock, mut graph) = self.writing()?;
         let handed = graph.reclaim(args.lease_seconds);
-        if !handed.is_empty() {
-            self.stored(&dir, &graph)?;
-        }
-        Ok(Json(handed.iter().map(|id| id.to_hex()).collect()))
+        let warnings = if !handed.is_empty() {
+            self.stored(&dir, &graph)?
+        } else {
+            Vec::new()
+        };
+        Ok(Json::noted(
+            handed.iter().map(|id| id.to_hex()).collect(),
+            warnings,
+        ))
     }
 
     #[tool(
@@ -565,10 +621,10 @@ impl ClaimdagServer {
         let id = parse(&args.id)?;
         let graph = self.reading()?;
         if graph.get(id).is_some() {
-            return Ok(Json(ReadNode::Row(shown(&graph, id)?)));
+            return Ok(Json::plain(ReadNode::Row(shown(&graph, id)?)));
         }
         if let Some(was) = graph.pruned(id) {
-            return Ok(Json(ReadNode::Pruned(PrunedNode {
+            return Ok(Json::plain(ReadNode::Pruned(PrunedNode {
                 id: id.to_hex(),
                 status: was.as_str().to_string(),
             })));
@@ -648,8 +704,8 @@ impl ClaimdagServer {
                 },
             )
             .map_err(bad)?;
-        self.stored(&dir, &graph)?;
-        Ok(Json(shown(&graph, id)?))
+        let warnings = self.stored(&dir, &graph)?;
+        Ok(Json::noted(shown(&graph, id)?, warnings))
     }
 
     #[tool(
@@ -671,8 +727,8 @@ impl ClaimdagServer {
         let actor = parse(&args.actor)?;
         let (dir, _lock, mut graph) = self.writing()?;
         graph.link_dep(parent, child, actor).map_err(bad)?;
-        self.stored(&dir, &graph)?;
-        Ok(Json(shown(&graph, child)?))
+        let warnings = self.stored(&dir, &graph)?;
+        Ok(Json::noted(shown(&graph, child)?, warnings))
     }
 
     #[tool(
@@ -694,8 +750,8 @@ impl ClaimdagServer {
         let actor = parse(&args.actor)?;
         let (dir, _lock, mut graph) = self.writing()?;
         graph.unlink_dep(parent, child, actor).map_err(bad)?;
-        self.stored(&dir, &graph)?;
-        Ok(Json(shown(&graph, child)?))
+        let warnings = self.stored(&dir, &graph)?;
+        Ok(Json::noted(shown(&graph, child)?, warnings))
     }
 }
 

@@ -6,7 +6,8 @@ A call is not stopped because of who the caller is.
 `release`, `complete`, `renew` and `set_running` still run when the actor
 is not the holder. Each of those writes one line, `allow`, `warn`, and
 the rule (`no-actor` or `not-assignee`), separated by tabs, on stderr and
-in `warn.log`.
+in `warn.log`. The server also puts that line in the tool result, as a
+text block after the row.
 
 A default graph directory another user owns is still opened. The same
 line is written with the rule `not-owner`. The directory is created with
