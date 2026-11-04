@@ -149,7 +149,21 @@ Mark a node terminal (done, failed, or cancelled).
 
 Pass the --gen returned by claim to be refused if the lease was reclaimed while the work was in flight. Omitting it finishes the node whatever happened to the claim, which is the only way to speak for a node nobody holds.
 
---actor names who is finishing it. With none, the call still finishes the node and records a warning: allow, warn, and no-actor, separated by tabs, on stderr and in warn.log. An actor who is not the holder is recorded the same way, with not-assignee, and the call still finishes the node. --force finishes it for nobody and appends a line to forced.log instead of that warning.
+--actor names who is finishing it.
+
+With none, the call still finishes the node.
+
+It records a warning on stderr and in warn.log.
+
+The warning is allow, warn, and no-actor, separated by tabs.
+
+An actor who is not the holder is recorded the same way, with not-assignee.
+
+The call still finishes the node.
+
+--force finishes it for nobody.
+
+It appends a line to forced.log instead of that warning.
 
 Usage: claimdag complete [OPTIONS] <ID>
 
@@ -193,7 +207,21 @@ Hand one claim back on purpose: ready again, assignee cleared, generation moved.
 
 The way off a claim before the work is terminal. A holder that stops without this stays busy until the lease runs out, and cannot claim anything else meanwhile.
 
---actor names the holder. With none, the call still hands the claim back and records a warning: allow, warn, and no-actor, separated by tabs, on stderr and in warn.log. An actor who is not the holder is recorded the same way, with not-assignee, and the call still hands the claim back. --force hands the claim back whoever holds it and appends a line to forced.log instead of that warning.
+--actor names the holder.
+
+With none, the call still hands the claim back.
+
+It records a warning on stderr and in warn.log.
+
+The warning is allow, warn, and no-actor, separated by tabs.
+
+An actor who is not the holder is recorded the same way, with not-assignee.
+
+The call still hands the claim back.
+
+--force hands the claim back whoever holds it.
+
+It appends a line to forced.log instead of that warning.
 
 Usage: claimdag release [OPTIONS] <ID>
 
@@ -300,12 +328,16 @@ Options:
 
 Ids are 32 lowercase hex characters (xxHash3-128). The zero id means unset.
 
-A =release= or =complete= with no actor still runs, and so does a =release=,
-=complete= or =renew= whose actor is not the holder. The line on stderr and
-in =warn.log= is =allow=, =warn=, and =no-actor= or =not-assignee=, separated
-by tabs. The server puts that line in the tool result, as a text block
-after the row. =--force= appends to =forced.log= instead. A default directory
-another user owns is opened the same way, with =not-owner=.
+A =release= or =complete= with no actor still runs.
+So does a =release=, =complete= or =renew= whose actor is not the holder.
+The line on stderr and in =warn.log= is =allow=, then =warn=, then the rule.
+The rule is =no-actor= or =not-assignee=.
+The fields are separated by tabs.
+The server puts that line in the tool result.
+It is a text block after the row.
+=--force= appends to =forced.log= instead.
+A default directory another user owns is opened the same way.
+The rule for that is =not-owner=.
 
 =claim= prints the new generation. =renew= moves the lease and keeps that
 generation. =get= prints the node and its dependencies. =complete --status

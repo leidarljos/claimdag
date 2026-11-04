@@ -104,12 +104,21 @@ enum Cmd {
     /// whatever happened to the claim, which is the only way to speak for a
     /// node nobody holds.
     ///
-    /// --actor names who is finishing it. With none, the call still finishes
-    /// the node and records a warning: allow, warn, and no-actor, separated
-    /// by tabs, on stderr and in warn.log. An actor who is not the holder is
-    /// recorded the same way, with not-assignee, and the call still finishes
-    /// the node. --force finishes it for nobody and appends a line to
-    /// forced.log instead of that warning.
+    /// --actor names who is finishing it.
+    ///
+    /// With none, the call still finishes the node.
+    ///
+    /// It records a warning on stderr and in warn.log.
+    ///
+    /// The warning is allow, warn, and no-actor, separated by tabs.
+    ///
+    /// An actor who is not the holder is recorded the same way, with not-assignee.
+    ///
+    /// The call still finishes the node.
+    ///
+    /// --force finishes it for nobody.
+    ///
+    /// It appends a line to forced.log instead of that warning.
     Complete {
         id: String,
         #[arg(long, default_value = "done")]
@@ -136,12 +145,21 @@ enum Cmd {
     /// without this stays busy until the lease runs out, and cannot claim
     /// anything else meanwhile.
     ///
-    /// --actor names the holder. With none, the call still hands the claim
-    /// back and records a warning: allow, warn, and no-actor, separated by
-    /// tabs, on stderr and in warn.log. An actor who is not the holder is
-    /// recorded the same way, with not-assignee, and the call still hands
-    /// the claim back. --force hands the claim back whoever holds it and
-    /// appends a line to forced.log instead of that warning.
+    /// --actor names the holder.
+    ///
+    /// With none, the call still hands the claim back.
+    ///
+    /// It records a warning on stderr and in warn.log.
+    ///
+    /// The warning is allow, warn, and no-actor, separated by tabs.
+    ///
+    /// An actor who is not the holder is recorded the same way, with not-assignee.
+    ///
+    /// The call still hands the claim back.
+    ///
+    /// --force hands the claim back whoever holds it.
+    ///
+    /// It appends a line to forced.log instead of that warning.
     Release {
         id: String,
         #[arg(long)]

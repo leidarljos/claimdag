@@ -3,10 +3,13 @@ Point at a graph
 
 ``--dir DIR``, else ``CLAIMDAG_DIR``, else ``$XDG_RUNTIME_DIR/claimdag``. With no
 runtime directory it is ``$XDG_STATE_HOME/claimdag``, else
-``~/.local/state/claimdag``, else ``/tmp/claimdag-UID``. Each default belongs to
-one user: claimdag makes it with mode 0700. A default another user owns
-is still opened, and the call writes ``allow``, ``warn`` and ``not-owner``,
-separated by tabs, on stderr and in ``warn.log``. A directory named by ``CLAIMDAG_DIR`` or ``--dir`` is used as
+``~/.local/state/claimdag``, else ``/tmp/claimdag-UID``.
+Each default belongs to one user.
+claimdag makes it with mode 0700.
+A default another user owns is still opened.
+The call writes ``allow``, ``warn`` and ``not-owner``, separated by tabs.
+That line is on stderr and in ``warn.log``.
+A directory named by ``CLAIMDAG_DIR`` or ``--dir`` is used as
 given, so a team can share one on purpose. The
 working directory is never used, so a worker in the wrong directory does
 not invent a second graph. A reader that finds no graph says so rather than

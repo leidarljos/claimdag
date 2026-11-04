@@ -10,19 +10,21 @@ runtime directory the defaults decide, tried in this order:
 and =/tmp/claimdag=, the old default. The first that holds a graph is used,
 else the first that applies, so a seat with no =HOME=, or with an
 =XDG_STATE_HOME= the other seats lack, still reads the graph they started.
-Each default belongs to one user: claimdag makes it with mode 0700. A
-default another user owns is still opened, and the call writes =allow=,
-=warn= and =not-owner=, separated by tabs, on stderr and in =warn.log=.
-The defaults pass over a graph in another user's directory when choosing
-which location already holds this seat's work. A directory named by
-=CLAIMDAG_DIR= or =--dir= is used as given, so a
+Each default belongs to one user.
+claimdag makes it with mode 0700.
+A default another user owns is still opened.
+The call writes =allow=, =warn= and =not-owner=, separated by tabs.
+That line is on stderr and in =warn.log=.
+The defaults pass over a graph in another user's directory when choosing which location already holds this seat's work.
+A directory named by =CLAIMDAG_DIR= or =--dir= is used as given, so a
 team can share one on purpose. The working directory is never used, so a
 worker in the wrong directory does not invent a second graph. A reader that
 finds no graph says so rather than answering "nothing claimable".
 
 =claimdag where= prints each location in that order, whether it is in use,
-holds work or has no graph, and the rule that names it. =--move= moves the
-graph in use, with =forced.log=, =warn.log= and =handles.json=, into the first default:
+holds work or has no graph, and the rule that names it.
+=--move= moves the graph in use into the first default.
+The move takes =forced.log=, =warn.log= and =handles.json= along.
 
 #+begin_src console
 $ claimdag where
