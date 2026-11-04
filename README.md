@@ -80,8 +80,8 @@ role affinity and preserving critical path progress.
 ## WorkGraph pane
 
 `claimdag-tui` draws the parent forest and claims, completes and archives
-through the same `WorkGraph` calls the command line makes, so an action a
-stranger may not take fails in the pane too. Bindings, the actor id and
+through the same `WorkGraph` calls the command line makes, so a call that
+records a warning on the command line records it in the pane too. Bindings, the actor id and
 the handle names are in the [how-to](https://leidarljos.github.io/claimdag/howto.html).
 
 ```console

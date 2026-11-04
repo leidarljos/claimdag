@@ -124,21 +124,23 @@ impl App {
     fn mutate(&mut self, done: &str, change: impl FnOnce(&mut WorkGraph) -> Result<(), String>) {
         self.message = match self.locked(change) {
             Err(why) => why,
-            Ok(()) => done.to_string(),
+            Ok(((), warnings)) => labeled(&self.dir, done, &warnings),
         };
         self.reload();
     }
 
-    /// Lock, load for writing, change, save, unlock.
+    /// Lock, load for writing, change, save, unlock. Warnings recorded on the
+    /// graph come back with the value, so the pane can show them.
     fn locked<T>(
         &self,
         change: impl FnOnce(&mut WorkGraph) -> Result<T, String>,
-    ) -> Result<T, String> {
+    ) -> Result<(T, Vec<String>), String> {
         let _lock = claimdag::lock_dir(&self.dir)?;
         let mut graph = WorkGraph::load_for_write(&self.dir).map_err(|e| e.to_string())?;
         let out = change(&mut graph)?;
+        let warnings = graph.warnings().to_vec();
         graph.save_dir(&self.dir)?;
-        Ok(out)
+        Ok((out, warnings))
     }
 
     /// Handle one key.
@@ -208,9 +210,13 @@ impl App {
         let lease = self.lease;
         self.message = match self.locked(|graph| Ok(graph.reclaim(lease).len())) {
             Err(why) => why,
-            Ok(0) => format!("nothing has been quiet for {lease}s"),
-            Ok(1) => "handed back 1 claim".to_string(),
-            Ok(n) => format!("handed back {n} claims"),
+            Ok((0, warnings)) => labeled(
+                &self.dir,
+                &format!("nothing has been quiet for {lease}s"),
+                &warnings,
+            ),
+            Ok((1, warnings)) => labeled(&self.dir, "handed back 1 claim", &warnings),
+            Ok((n, warnings)) => labeled(&self.dir, &format!("handed back {n} claims"), &warnings),
         };
         self.reload();
     }
@@ -252,6 +258,18 @@ impl App {
         let actor = self.actor;
         self.mutate("unlinked", |graph| graph.unlink_dep(dep, id, actor));
     }
+}
+
+/// The pane's status line, with any warning underneath it. The lines are also
+/// appended to `warn.log`. stderr is left alone: the pane owns the screen.
+fn labeled(dir: &Path, done: &str, warnings: &[String]) -> String {
+    if warnings.is_empty() {
+        return done.to_string();
+    }
+    for line in warnings {
+        claimdag::append_warn(dir, line);
+    }
+    format!("{done}\n{}", warnings.join("\n"))
 }
 
 #[cfg(test)]
@@ -323,9 +341,10 @@ mod tests {
         assert_eq!(std::fs::read(&snapshot).unwrap(), torn);
     }
 
-    /// The pane must not be a way around the guard the command line obeys.
+    /// The pane runs the same call the command line runs, and shows the same
+    /// warning when the actor is not the holder.
     #[test]
-    fn a_stranger_cannot_complete_somebody_elses_work() {
+    fn a_stranger_completes_and_the_pane_labels_it() {
         let dir = tempfile::tempdir().unwrap();
         let id = seeded(dir.path());
         let mut holder = App::open(dir.path().to_path_buf(), actor());
@@ -335,15 +354,17 @@ mod tests {
         let mut stranger = App::open(dir.path().to_path_buf(), other);
         stranger.handle_key(key(KeyCode::Char('d')));
         assert!(
-            stranger.message.contains("not assignee"),
+            stranger.message.contains("allow\twarn\tnot-assignee\t"),
             "{}",
             stranger.message
         );
-        assert!(!WorkGraph::load_dir(dir.path())
+        assert!(WorkGraph::load_dir(dir.path())
             .get(id)
             .unwrap()
             .status
             .is_terminal());
+        let log = std::fs::read_to_string(dir.path().join(claimdag::WARN_LOG)).unwrap();
+        assert!(log.contains("allow\twarn\tnot-assignee\t"), "{log}");
     }
 
     #[test]

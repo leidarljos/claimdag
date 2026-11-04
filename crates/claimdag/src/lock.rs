@@ -37,19 +37,21 @@ impl Drop for Lock {
 
 /// Take the exclusive lock on `dir/lock`, creating the directory, and write
 /// this process's pid into it. Waits a bounded time while another process
-/// holds it. A default location is made private and must be this user's;
-/// see [`prepare`].
+/// holds it. A default location is made private. One another user owns is
+/// still locked, and the warning from [`prepare`] is recorded.
 ///
 /// # Errors
 ///
 /// Fails when the directory or the lock file cannot be created, the lock
 /// cannot be taken or is still held when the wait runs out (the one line
-/// names the holder's pid and how to release it), or a default location
-/// belongs to another user.
+/// names the holder's pid and how to release it). A default location another
+/// user owns is still locked, and [`prepare`] records `not-owner`.
 pub fn lock_dir(dir: &Path) -> Result<Lock, String> {
     // SAFETY: geteuid has no preconditions and cannot fail.
     let uid = unsafe { libc::geteuid() };
-    prepare(dir, crate::seat::is_default_dir(dir), uid)?;
+    if let Some(line) = prepare(dir, crate::seat::is_default_dir(dir), uid)? {
+        crate::label::emit(dir, &line);
+    }
     let path = dir.join("lock");
     let file = OpenOptions::new()
         .create(true)
@@ -100,17 +102,19 @@ fn held(path: &Path) -> String {
 
 /// Make the graph directory. A default location (the state directory,
 /// `/tmp/claimdag-UID` or the old `/tmp/claimdag`) is made with mode 0700,
-/// so another user cannot read the graph out of `/tmp`, and is refused when
-/// another user owns it. A directory named by `CLAIMDAG_DIR` or `--dir` is
-/// used as given: a team can share one on purpose.
+/// so another user cannot read a graph this seat created under `/tmp`. A
+/// default another user already owns is still used: the returned line is
+/// `not-owner`, and the caller records it. A directory named by
+/// `CLAIMDAG_DIR` or `--dir` is used as given, with no such line: a team
+/// can share one on purpose.
 ///
 /// # Errors
 ///
-/// Fails when the directory cannot be made, or a default location belongs
-/// to a user other than `uid`.
-pub fn prepare(dir: &Path, default: bool, uid: u32) -> Result<(), String> {
+/// Fails when the directory cannot be made or its owner cannot be read.
+pub fn prepare(dir: &Path, default: bool, uid: u32) -> Result<Option<String>, String> {
     if !default {
-        return std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()));
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        return Ok(None);
     }
     {
         use std::os::unix::fs::DirBuilderExt;
@@ -123,59 +127,67 @@ pub fn prepare(dir: &Path, default: bool, uid: u32) -> Result<(), String> {
     owned_by(dir, uid)
 }
 
-/// Refuse a graph directory another user owns. A shared default made one
-/// user's claims land in, or fail on, another user's graph.
+/// The warning when a default graph directory belongs to someone else.
+///
+/// A shared default made one user's claims land in another user's graph.
+/// The directory is still the one to open: the line names the owner, and
+/// the call proceeds. `Ok(None)` when `uid` owns it.
 ///
 /// # Errors
 ///
-/// Names the owner and the variable that picks another directory.
-pub fn owned_by(dir: &Path, uid: u32) -> Result<(), String> {
+/// Fails when the directory's owner cannot be read.
+pub fn owned_by(dir: &Path, uid: u32) -> Result<Option<String>, String> {
     use std::os::unix::fs::MetadataExt;
     let meta = std::fs::metadata(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     if meta.uid() != uid {
-        return Err(format!(
-            "{} belongs to uid {}, not this user (uid {uid}); its graph is not this seat's. \
-             Set CLAIMDAG_DIR or pass --dir to use a directory of your own",
-            dir.display(),
-            meta.uid()
-        ));
+        return Ok(Some(crate::label::line(
+            "not-owner",
+            &format!("{} owner {} uid {uid}", dir.display(), meta.uid()),
+        )));
     }
-    Ok(())
+    Ok(None)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Another user's directory is refused by name.
+    /// Another user's directory is labeled and still usable.
     #[test]
-    fn a_directory_another_user_owns_is_refused() {
+    fn a_directory_another_user_owns_is_labeled() {
         use std::os::unix::fs::MetadataExt;
         let dir = std::env::temp_dir().join(format!("claimdag-own-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let mine = std::fs::metadata(&dir).unwrap().uid();
-        assert!(owned_by(&dir, mine).is_ok());
-        let err = owned_by(&dir, mine + 1).unwrap_err();
-        assert!(err.contains("not this user"), "{err}");
-        assert!(err.contains("CLAIMDAG_DIR"), "{err}");
+        assert_eq!(owned_by(&dir, mine).unwrap(), None);
+        let line = owned_by(&dir, mine + 1).unwrap().unwrap();
+        assert_eq!(
+            line,
+            format!(
+                "allow\twarn\tnot-owner\t{} owner {mine} uid {}",
+                dir.display(),
+                mine + 1
+            )
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// A default location is made private, and refused when another user
-    /// owns it.
+    /// A default location is made private. Another user's directory is
+    /// labeled, and the directory is still there to open.
     #[test]
-    fn a_default_directory_is_private_and_must_be_ours() {
+    fn a_default_directory_is_private_and_another_owner_is_labeled() {
         use std::os::unix::fs::{MetadataExt, PermissionsExt};
         let dir = std::env::temp_dir().join(format!("claimdag-mode-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let graph = dir.join("graph");
         // SAFETY: geteuid has no preconditions and cannot fail.
         let mine = unsafe { libc::geteuid() };
-        prepare(&graph, true, mine).unwrap();
+        assert_eq!(prepare(&graph, true, mine).unwrap(), None);
         let meta = std::fs::metadata(&graph).unwrap();
         assert_eq!(meta.permissions().mode() & 0o777, 0o700);
-        let err = prepare(&graph, true, meta.uid() + 1).unwrap_err();
-        assert!(err.contains("not this user"), "{err}");
+        let line = prepare(&graph, true, meta.uid() + 1).unwrap().unwrap();
+        assert!(line.starts_with("allow\twarn\tnot-owner\t"), "{line}");
+        assert!(graph.is_dir());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

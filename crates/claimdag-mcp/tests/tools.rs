@@ -654,10 +654,17 @@ fn every_tool_returns_an_answer_and_an_error() {
     );
     assert_claim(&next, SPEC, 2);
 
-    seat.refused(
+    // The spec is held by the reader. The writer still renews it, and the
+    // warning names that the actor is not the holder. The generation stays.
+    let renewed_other = seat.answer(
         "claimdag_renew",
         &format!(r#"{{"id":"{SPEC}","actor":"{WRITER}"}}"#),
-        "renew: not assignee",
+    );
+    assert_claim(&renewed_other, SPEC, 2);
+    let warned = std::fs::read_to_string(dir.path().join("warn.log")).expect("warn.log");
+    assert!(
+        warned.contains("allow\twarn\tnot-assignee\trenew "),
+        "{warned}"
     );
     let renewed = seat.answer(
         "claimdag_renew",
@@ -679,16 +686,18 @@ fn every_tool_returns_an_answer_and_an_error() {
         },
     );
 
-    seat.refused(
-        "claimdag_release",
-        &format!(r#"{{"id":"{PARSER}","actor":"{READER}"}}"#),
-        "release: not assignee",
-    );
+    // The writer is not the holder. The release still runs, the generation
+    // moves, and the warning names both.
     let released = seat.answer(
         "claimdag_release",
-        &format!(r#"{{"id":"{SPEC}","actor":"{READER}"}}"#),
+        &format!(r#"{{"id":"{SPEC}","actor":"{WRITER}"}}"#),
     );
     assert_claim(&released, SPEC, 3);
+    let warned = std::fs::read_to_string(dir.path().join("warn.log")).expect("warn.log");
+    assert!(
+        warned.contains("allow\twarn\tnot-assignee\trelease "),
+        "{warned}"
+    );
     let ready = seat.rows("claimdag_ready", "{}");
     assert_eq!(ids(&ready), [SPEC]);
     assert_node(

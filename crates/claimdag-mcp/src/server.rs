@@ -240,6 +240,17 @@ impl ClaimdagServer {
         }
     }
 
+    /// Save, then record any warning the call produced. The line is on stderr
+    /// and in `warn.log` before the tool result is written, so a seat that
+    /// reads the result can also read the file.
+    fn stored(&self, dir: &std::path::Path, graph: &WorkGraph) -> Result<(), Fail> {
+        graph.save_dir(dir).map_err(bad)?;
+        for line in graph.warnings() {
+            claimdag::emit_warn(dir, line);
+        }
+        Ok(())
+    }
+
     #[tool(
         description = "Work that can be taken right now: unblocked, unheld, and not finished, deepest chain first. Take the first one: the order is the critical path, so the head of a long chain outranks a leaf nothing waits on. Ask this before anything else. An empty answer means the seat is quiet; a failure means there is no graph here, which is a different thing.",
         annotations(
@@ -339,7 +350,7 @@ impl ClaimdagServer {
         let assignee = parse(&args.assignee)?;
         let (dir, _lock, mut graph) = self.writing()?;
         let generation = graph.claim(id, assignee, args.generation).map_err(bad)?;
-        graph.save_dir(&dir).map_err(bad)?;
+        self.stored(&dir, &graph)?;
         Ok(Json(ClaimRow {
             id: id.to_hex(),
             generation,
@@ -365,7 +376,7 @@ impl ClaimdagServer {
         let slack = args.slack.unwrap_or(1);
         let (dir, _lock, mut graph) = self.writing()?;
         let (id, generation) = graph.claim_next(assignee, role, slack).map_err(bad)?;
-        graph.save_dir(&dir).map_err(bad)?;
+        self.stored(&dir, &graph)?;
         Ok(Json(ClaimRow {
             id: id.to_hex(),
             generation,
@@ -373,7 +384,7 @@ impl ClaimdagServer {
     }
 
     #[tool(
-        description = "Say the holder is still working, which moves the lease and leaves the generation alone. A renewal is not a change of ownership, so the token you hold stays good.",
+        description = "Say the holder is still working, which moves the lease and leaves the generation alone. A renewal is not a change of ownership, so the token you hold stays good. An actor who is not the holder still moves the lease and records allow, warn, and not-assignee, separated by tabs.",
         annotations(
             title = "Renew a lease",
             read_only_hint = false,
@@ -390,7 +401,7 @@ impl ClaimdagServer {
         let actor = parse(&args.actor)?;
         let (dir, _lock, mut graph) = self.writing()?;
         let generation = graph.renew(id, actor).map_err(bad)?;
-        graph.save_dir(&dir).map_err(bad)?;
+        self.stored(&dir, &graph)?;
         Ok(Json(ClaimRow {
             id: id.to_hex(),
             generation,
@@ -398,7 +409,7 @@ impl ClaimdagServer {
     }
 
     #[tool(
-        description = "Hand one claim back on purpose before the work is terminal: the node is ready again, the assignee clears, and the generation moves so the token you held is fenced. Call this when you stop working on a node without finishing it; until you do, you stay busy and cannot claim anything else. The actor must be the holder; the zero id is refused.",
+        description = "Hand one claim back on purpose before the work is terminal: the node is ready again, the assignee clears, and the generation moves so the token you held is fenced. Call this when you stop working on a node without finishing it; until you do, you stay busy and cannot claim anything else. An actor who is not the holder, or the zero id, still hands it back and records allow, warn, and not-assignee or no-actor, separated by tabs.",
         annotations(
             title = "Hand a claim back",
             read_only_hint = false,
@@ -415,7 +426,7 @@ impl ClaimdagServer {
         let actor = parse(&args.actor)?;
         let (dir, _lock, mut graph) = self.writing()?;
         let generation = graph.release(id, actor).map_err(bad)?;
-        graph.save_dir(&dir).map_err(bad)?;
+        self.stored(&dir, &graph)?;
         Ok(Json(ClaimRow {
             id: id.to_hex(),
             generation,
@@ -440,7 +451,7 @@ impl ClaimdagServer {
         let actor = parse(&args.actor)?;
         let (dir, _lock, mut graph) = self.writing()?;
         let generation = graph.reopen(id, actor).map_err(bad)?;
-        graph.save_dir(&dir).map_err(bad)?;
+        self.stored(&dir, &graph)?;
         Ok(Json(ClaimRow {
             id: id.to_hex(),
             generation,
@@ -448,7 +459,7 @@ impl ClaimdagServer {
     }
 
     #[tool(
-        description = "Complete a node. Pass the generation claim gave you: without it the complete goes through even if your lease was reclaimed and somebody else has the work. Done is refused while a dependency is unfinished, and the error names it. The zero actor is refused. Terminal is sticky.",
+        description = "Complete a node. Pass the generation claim gave you: without it the complete goes through even if your lease was reclaimed and somebody else has the work. Done is refused while a dependency is unfinished, and the error names it. An actor who is not the holder, or the zero id, still finishes the node and records allow, warn, and not-assignee or no-actor, separated by tabs. Terminal is sticky.",
         annotations(
             title = "Complete the node",
             read_only_hint = false,
@@ -483,7 +494,7 @@ impl ClaimdagServer {
                 args.generation,
             )
             .map_err(bad)?;
-        graph.save_dir(&dir).map_err(bad)?;
+        self.stored(&dir, &graph)?;
         if let Some(node) = graph.get(id) {
             let now = now_unix();
             let depth = graph.critical_depth();
@@ -534,7 +545,7 @@ impl ClaimdagServer {
         let (dir, _lock, mut graph) = self.writing()?;
         let handed = graph.reclaim(args.lease_seconds);
         if !handed.is_empty() {
-            graph.save_dir(&dir).map_err(bad)?;
+            self.stored(&dir, &graph)?;
         }
         Ok(Json(handed.iter().map(|id| id.to_hex()).collect()))
     }
@@ -637,7 +648,7 @@ impl ClaimdagServer {
                 },
             )
             .map_err(bad)?;
-        graph.save_dir(&dir).map_err(bad)?;
+        self.stored(&dir, &graph)?;
         Ok(Json(shown(&graph, id)?))
     }
 
@@ -660,7 +671,7 @@ impl ClaimdagServer {
         let actor = parse(&args.actor)?;
         let (dir, _lock, mut graph) = self.writing()?;
         graph.link_dep(parent, child, actor).map_err(bad)?;
-        graph.save_dir(&dir).map_err(bad)?;
+        self.stored(&dir, &graph)?;
         Ok(Json(shown(&graph, child)?))
     }
 
@@ -683,7 +694,7 @@ impl ClaimdagServer {
         let actor = parse(&args.actor)?;
         let (dir, _lock, mut graph) = self.writing()?;
         graph.unlink_dep(parent, child, actor).map_err(bad)?;
-        graph.save_dir(&dir).map_err(bad)?;
+        self.stored(&dir, &graph)?;
         Ok(Json(shown(&graph, child)?))
     }
 }

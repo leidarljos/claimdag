@@ -98,68 +98,82 @@ fn status_of(dir: &Path, id: &str) -> String {
 }
 
 #[test]
-fn not_assignee_names_the_holder_and_the_command() {
+fn not_assignee_runs_and_names_the_holder() {
     for verb in ["release", "renew", "complete"] {
         let dir = tempfile::tempdir().unwrap();
         let id = held(dir.path());
         let since = updated_unix(dir.path(), &id);
         let out = claimdag(dir.path(), &[verb, &id, "--actor", SEAT_B]);
         let line = format!(
-            "{verb}: not assignee. node {id} is held by {SEAT_A} since unix {since}. claimdag {verb} {id} --actor {SEAT_A}"
+            "allow\twarn\tnot-assignee\t{verb} {id} actor {SEAT_B} holder {SEAT_A} since {since}"
         );
-        assert_refused(&out, &line);
-        let fixed = claimdag(dir.path(), &[verb, &id, "--actor", SEAT_A]);
-        assert_eq!(
-            fixed.status.code(),
-            Some(0),
-            "{verb} as the holder: {}",
-            stderr(&fixed)
-        );
+        assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+        assert_eq!(stderr(&out), format!("{line}\n"));
+        let log = std::fs::read_to_string(dir.path().join("warn.log")).unwrap();
+        assert_eq!(log, format!("{line}\n"));
+        match verb {
+            "release" => assert_eq!(field(dir.path(), &id, "assignee"), NOBODY),
+            "renew" => {
+                assert_eq!(field(dir.path(), &id, "assignee"), SEAT_A);
+                assert_eq!(status_of(dir.path(), &id), "claimed");
+            }
+            "complete" => assert_eq!(stdout(&out), format!("{id}  done")),
+            _ => unreachable!(),
+        }
     }
 }
 
 #[test]
-fn no_actor_names_the_holder_and_the_command() {
-    for verb in ["release", "complete"] {
+fn no_actor_runs_and_names_the_holder() {
+    for (verb, args_tail) in [
+        ("release", None),
+        ("complete", None),
+        ("release", Some(NOBODY)),
+        ("complete", Some(NOBODY)),
+    ] {
         let dir = tempfile::tempdir().unwrap();
         let id = held(dir.path());
-        let since = updated_unix(dir.path(), &id);
-        let line = format!(
-            "{verb}: no actor. node {id} is held by {SEAT_A} since unix {since}. claimdag {verb} {id} --actor {SEAT_A}. claimdag {verb} {id} --force acts for nobody and is logged to forced.log"
-        );
-        assert_refused(&claimdag(dir.path(), &[verb, &id]), &line);
-        assert_refused(
-            &claimdag(dir.path(), &[verb, &id, "--actor", NOBODY]),
-            &line,
-        );
-        let fixed = claimdag(dir.path(), &[verb, &id, "--actor", SEAT_A]);
-        assert_eq!(fixed.status.code(), Some(0), "{}", stderr(&fixed));
+        let mut args = vec![verb, id.as_str()];
+        if let Some(actor) = args_tail {
+            args.extend(["--actor", actor]);
+        }
+        let out = claimdag(dir.path(), &args);
+        let line = format!("allow\twarn\tno-actor\t{verb} {id} holder {SEAT_A}");
+        assert_eq!(out.status.code(), Some(0), "{args:?} {}", stderr(&out));
+        assert_eq!(stderr(&out), format!("{line}\n"), "{args:?}");
         assert!(!dir.path().join("forced.log").exists());
     }
 }
 
 #[test]
-fn release_with_no_holder_names_get() {
+fn release_of_an_unheld_node_names_the_status() {
     let dir = tempfile::tempdir().unwrap();
     let id = upsert(dir.path(), &["--status", "ready", "--summary", "open"]);
-    let line = format!("release: no actor. node {id} has no holder. claimdag get {id}");
-    assert_refused(&claimdag(dir.path(), &["release", &id]), &line);
+    assert_refused(
+        &claimdag(dir.path(), &["release", &id]),
+        "release: status ready",
+    );
     assert_eq!(status_of(dir.path(), &id), "ready");
     assert_eq!(field(dir.path(), &id, "assignee"), NOBODY);
+    assert!(!dir.path().join("warn.log").exists());
 }
 
 #[test]
-fn complete_with_no_holder_names_force() {
+fn complete_with_no_holder_runs_and_is_labeled() {
     let dir = tempfile::tempdir().unwrap();
     let id = upsert(dir.path(), &["--status", "ready", "--summary", "open"]);
-    let line = format!(
-        "complete: no actor. node {id} has no holder. claimdag complete {id} --force acts for nobody and is logged to forced.log"
-    );
-    assert_refused(&claimdag(dir.path(), &["complete", &id]), &line);
-    assert_eq!(status_of(dir.path(), &id), "ready");
-    let forced = claimdag(dir.path(), &["complete", &id, "--force"]);
+    let out = claimdag(dir.path(), &["complete", &id]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let line = format!("allow\twarn\tno-actor\tcomplete {id} holder {NOBODY}");
+    assert_eq!(stderr(&out), format!("{line}\n"));
+    assert_eq!(stdout(&out), format!("{id}  done"));
+    let other = upsert(dir.path(), &["--status", "ready", "--summary", "forced"]);
+    let forced = claimdag(dir.path(), &["complete", &other, "--force"]);
     assert_eq!(forced.status.code(), Some(0), "{}", stderr(&forced));
-    assert_eq!(stdout(&forced), format!("{id}  done"));
+    assert_eq!(stdout(&forced), format!("{other}  done"));
+    let log = std::fs::read_to_string(dir.path().join("forced.log")).unwrap();
+    assert!(log.contains("complete --force"), "{log}");
+    assert!(log.contains(&other), "{log}");
 }
 
 #[test]
@@ -306,7 +320,7 @@ fn release_of_an_unknown_id_with_no_actor_names_list() {
     let dir = tempfile::tempdir().unwrap();
     let _real = upsert(dir.path(), &["--status", "ready", "--summary", "real"]);
     let missing = "dddddddddddddddddddddddddddddddd";
-    let line = format!("release: no actor. unknown id {missing}. claimdag list --all");
+    let line = format!("release: unknown id {missing}. claimdag list --all");
     assert_refused(&claimdag(dir.path(), &["release", missing]), &line);
 }
 

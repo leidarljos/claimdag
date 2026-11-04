@@ -104,9 +104,12 @@ enum Cmd {
     /// whatever happened to the claim, which is the only way to speak for a
     /// node nobody holds.
     ///
-    /// --actor names who is finishing it. Without one the call is refused;
-    /// --force finishes it for nobody, whoever holds it, and appends a line
-    /// to forced.log in the graph directory.
+    /// --actor names who is finishing it. With none, the call still finishes
+    /// the node and records a warning: allow, warn, and no-actor, separated
+    /// by tabs, on stderr and in warn.log. An actor who is not the holder is
+    /// recorded the same way, with not-assignee, and the call still finishes
+    /// the node. --force finishes it for nobody and appends a line to
+    /// forced.log instead of that warning.
     Complete {
         id: String,
         #[arg(long, default_value = "done")]
@@ -133,9 +136,12 @@ enum Cmd {
     /// without this stays busy until the lease runs out, and cannot claim
     /// anything else meanwhile.
     ///
-    /// --actor names the holder. Without one the call is refused; --force
-    /// hands the claim back whoever holds it and appends a line to
-    /// forced.log in the graph directory.
+    /// --actor names the holder. With none, the call still hands the claim
+    /// back and records a warning: allow, warn, and no-actor, separated by
+    /// tabs, on stderr and in warn.log. An actor who is not the holder is
+    /// recorded the same way, with not-assignee, and the call still hands
+    /// the claim back. --force hands the claim back whoever holds it and
+    /// appends a line to forced.log instead of that warning.
     Release {
         id: String,
         #[arg(long)]
@@ -611,18 +617,17 @@ fn run() -> Result<(), String> {
             let status =
                 WorkStatus::parse_str(&status).ok_or_else(|| format!("bad status {status}"))?;
             let id = parse_id(&id, &g)?;
-            match actor {
-                Some(actor) if !force => {
-                    let actor = parse_id(&actor, &g)?;
-                    g.complete(id, status, &summary, actor, gen)?;
-                    g.save_dir(&dir)?;
-                }
-                None if !force => return g.complete(id, status, &summary, WorkId::ZERO, gen),
-                _ => {
-                    let holder = g.complete_forced(id, status, &summary, gen)?;
-                    g.save_dir(&dir)?;
-                    log_forced(&dir, "complete", id, holder, status.as_str())?;
-                }
+            if force {
+                let holder = g.complete_forced(id, status, &summary, gen)?;
+                g.save_dir(&dir)?;
+                log_forced(&dir, "complete", id, holder, status.as_str())?;
+            } else {
+                let actor = match actor {
+                    Some(actor) => parse_id(&actor, &g)?,
+                    None => WorkId::ZERO,
+                };
+                g.complete(id, status, &summary, actor, gen)?;
+                g.save_dir(&dir)?;
             }
             match g.pruned(id) {
                 Some(was) => print_pruned(id, was),
@@ -638,20 +643,19 @@ fn run() -> Result<(), String> {
         }
         Cmd::Release { id, actor, force } => {
             let id = parse_id(&id, &g)?;
-            let cas = match actor {
-                Some(actor) if !force => {
-                    let actor = parse_id(&actor, &g)?;
-                    let cas = g.release(id, actor)?;
-                    g.save_dir(&dir)?;
-                    cas
-                }
-                None if !force => return g.release(id, WorkId::ZERO).map(|_| ()),
-                _ => {
-                    let (cas, holder) = g.release_forced(id)?;
-                    g.save_dir(&dir)?;
-                    log_forced(&dir, "release", id, holder, &format!("gen={cas}"))?;
-                    cas
-                }
+            let cas = if force {
+                let (cas, holder) = g.release_forced(id)?;
+                g.save_dir(&dir)?;
+                log_forced(&dir, "release", id, holder, &format!("gen={cas}"))?;
+                cas
+            } else {
+                let actor = match actor {
+                    Some(actor) => parse_id(&actor, &g)?,
+                    None => WorkId::ZERO,
+                };
+                let cas = g.release(id, actor)?;
+                g.save_dir(&dir)?;
+                cas
             };
             match g.pruned(id) {
                 Some(was) => print_pruned(id, was),
@@ -716,6 +720,9 @@ fn run() -> Result<(), String> {
             println!("{}  live", id.to_hex());
         }
         Cmd::Where { .. } => unreachable!("where is answered before the graph is opened"),
+    }
+    for line in g.warnings() {
+        claimdag::emit_warn(&dir, line);
     }
     Ok(())
 }

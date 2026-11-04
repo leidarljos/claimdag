@@ -69,8 +69,8 @@ const TMP: &str = "/tmp";
 const ELSEWHERE: &str = "elsewhere";
 
 /// What a graph directory keeps besides its lock: the snapshot, the log of
-/// forced calls the command line appends to, and the pane's names.
-const KEPT: [&str; 3] = [SNAP_BIN, "forced.log", "handles.json"];
+/// forced calls, the warning lines, and the pane's names.
+const KEPT: [&str; 4] = [SNAP_BIN, "forced.log", crate::WARN_LOG, "handles.json"];
 
 fn euid() -> u32 {
     // SAFETY: geteuid has no preconditions and cannot fail.
@@ -205,7 +205,9 @@ impl Located {
         };
         let from = self.dir();
         let _from = crate::lock::lock_dir(from)?;
-        crate::lock::prepare(to, true, euid())?;
+        if let Some(line) = crate::lock::prepare(to, true, euid())? {
+            crate::label::emit(to, &line);
+        }
         let _to = crate::lock::lock_dir(to)?;
         // Another seat may have moved it, or started a graph there, while
         // this one waited for the locks.

@@ -59,27 +59,30 @@ fn a_live_claim_survives_an_upsert() {
 }
 
 #[test]
-fn only_the_assignee_starts_the_work() {
-    // complete refuses a stranger. set_running is the same access question and
-    // should answer the same way, or the ledger records the wrong agent as
-    // having started somebody else's node.
+fn a_stranger_starting_the_work_is_labeled() {
+    // set_running records who asked. When that is not the holder the call
+    // still runs, and the warning names both.
     let mut graph = WorkGraph::default();
     let node = ready(&mut graph, "the work");
     let holder = actor(7);
     let stranger = actor(9);
     graph.claim(node, holder, None).expect("claim");
 
+    graph.set_running(node, stranger).expect("runs");
+    assert_eq!(graph.get(node).unwrap().status, WorkStatus::Running);
     assert!(
-        graph.set_running(node, stranger).is_err(),
-        "a stranger marked another agent's claim as running"
+        graph
+            .warnings()
+            .iter()
+            .any(|line| line.starts_with("allow\twarn\tnot-assignee\trunning ")),
+        "{:?}",
+        graph.warnings()
     );
     graph.set_running(node, holder).expect("the holder may");
 }
 
 #[test]
-fn a_terminal_summary_is_not_rewritable_by_a_stranger() {
-    // complete returns early for a terminal node and rewrites the summary
-    // before it ever reaches the assignee check.
+fn a_stranger_rewriting_a_finished_summary_is_labeled() {
     let mut graph = WorkGraph::default();
     let node = ready(&mut graph, "the work");
     let holder = actor(7);
@@ -88,14 +91,17 @@ fn a_terminal_summary_is_not_rewritable_by_a_stranger() {
         .complete(node, WorkStatus::Done, "what happened", holder, None)
         .expect("complete");
 
-    let rewritten = graph.complete(node, WorkStatus::Done, "something else", actor(9), None);
-    let summary = graph
-        .get(node)
-        .map(|n| n.summary.clone())
-        .unwrap_or_default();
+    graph
+        .complete(node, WorkStatus::Done, "something else", actor(9), None)
+        .expect("runs");
+    assert_eq!(graph.get(node).unwrap().summary, "something else");
     assert!(
-        rewritten.is_err() || summary == "what happened",
-        "a stranger rewrote a finished node's summary to {summary:?}"
+        graph
+            .warnings()
+            .iter()
+            .any(|line| line.starts_with("allow\twarn\tnot-assignee\tcomplete ")),
+        "{:?}",
+        graph.warnings()
     );
 }
 
@@ -188,42 +194,55 @@ fn a_failed_dependency_does_not_ready_what_waited_on_it() {
 }
 
 /// The zero actor used to mean "anyone" to release and complete, and it was
-/// the default on the command line. Now it is refused, and acting for nobody
-/// is its own call that the ledger names.
+/// the default on the command line. The call still runs, and the warning
+/// names that nobody was given. `--force` stays the explicit call, and it
+/// still checks the fencing token.
 #[test]
-fn the_zero_actor_is_refused_and_force_is_explicit() {
+fn the_zero_actor_runs_and_force_stays_explicit() {
     let mut graph = WorkGraph::default();
     let node = ready(&mut graph, "held");
     let holder = actor(7);
     let held_gen = graph.claim(node, holder, None).expect("claim");
-    let release = graph
-        .release(node, WorkId::ZERO)
-        .expect_err("zero released");
-    assert!(release.starts_with("release: no actor"), "{release}");
-    let done = graph
-        .complete(node, WorkStatus::Done, "", WorkId::ZERO, None)
-        .expect_err("zero completed");
-    assert!(done.starts_with("complete: no actor"), "{done}");
-    assert_eq!(graph.get(node).map(|n| n.assignee), Some(holder));
-
-    let (generation, was) = graph.release_forced(node).expect("forced release");
-    assert_eq!(was, holder);
+    let generation = graph.release(node, WorkId::ZERO).expect("zero released");
     assert!(
         generation > held_gen,
-        "a forced release moves the generation"
+        "a zero-actor release moves the generation"
     );
     assert_eq!(graph.get(node).map(|n| n.assignee), Some(WorkId::ZERO));
+    assert!(
+        graph
+            .warnings()
+            .iter()
+            .any(|line| line.starts_with("allow\twarn\tno-actor\trelease ")),
+        "{:?}",
+        graph.warnings()
+    );
 
     let next = actor(8);
     let fresh = graph.claim(node, next, None).expect("claim again");
+    graph
+        .complete(node, WorkStatus::Done, "", WorkId::ZERO, Some(fresh))
+        .expect("zero completed");
+    assert!(graph.get(node).unwrap().status.is_terminal());
     assert!(
         graph
-            .complete_forced(node, WorkStatus::Done, "", Some(held_gen))
+            .warnings()
+            .iter()
+            .any(|line| line.starts_with("allow\twarn\tno-actor\tcomplete ")),
+        "{:?}",
+        graph.warnings()
+    );
+
+    let other = ready(&mut graph, "fenced");
+    let fenced = graph.claim(other, next, None).expect("claim");
+    assert!(
+        graph
+            .complete_forced(other, WorkStatus::Done, "", Some(fenced.wrapping_add(1)))
             .is_err(),
         "a forced complete skipped the fencing token"
     );
     let was = graph
-        .complete_forced(node, WorkStatus::Done, "", Some(fresh))
+        .complete_forced(other, WorkStatus::Done, "", Some(fenced))
         .expect("forced complete");
     assert_eq!(was, next);
 }
@@ -406,8 +425,20 @@ fn renewing_holds_the_lease_without_moving_the_generation() {
     let held_gen = graph.claim(node, holder, None).expect("claim");
 
     assert_eq!(graph.renew(node, holder).expect("renew"), held_gen);
-    // A stranger cannot renew somebody else's lease.
-    assert!(graph.renew(node, actor(9)).is_err());
+    // Someone else still moves the lease, and the warning names the holder.
+    assert_eq!(
+        graph.renew(node, actor(9)).expect("labeled renew"),
+        held_gen
+    );
+    assert_eq!(graph.get(node).unwrap().assignee, holder);
+    assert!(
+        graph
+            .warnings()
+            .iter()
+            .any(|line| line.starts_with("allow\twarn\tnot-assignee\trenew ")),
+        "{:?}",
+        graph.warnings()
+    );
     // And the token still finishes the work.
     graph
         .complete(node, WorkStatus::Done, "", holder, Some(held_gen))

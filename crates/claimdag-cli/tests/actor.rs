@@ -43,36 +43,56 @@ fn assignee(dir: &Path, id: &str) -> String {
 }
 
 #[test]
-fn release_and_complete_without_an_actor_are_refused() {
-    let dir = tempfile::tempdir().unwrap();
-    let id = held(dir.path());
-    for args in [vec!["release", &id], vec!["complete", &id]] {
-        let out = claimdag(dir.path(), &args);
-        assert!(!out.status.success(), "{args:?} went through with no actor");
+fn release_and_complete_without_an_actor_run_and_are_labeled() {
+    for verb in ["release", "complete"] {
+        let dir = tempfile::tempdir().unwrap();
+        let id = held(dir.path());
+        let out = claimdag(dir.path(), &[verb, &id]);
+        assert!(out.status.success(), "{verb} stopped: {}", stderr(&out));
+        let line = format!("allow\twarn\tno-actor\t{verb} {id} holder {SEAT_A}");
+        assert_eq!(stderr(&out), format!("{line}\n"));
+        let log = std::fs::read_to_string(dir.path().join("warn.log")).unwrap();
+        assert_eq!(log, format!("{line}\n"));
+        assert!(!dir.path().join("forced.log").exists());
+        if verb == "release" {
+            assert_eq!(assignee(dir.path(), &id), NOBODY);
+        } else {
+            assert!(stdout(&out).ends_with("done"), "{}", stdout(&out));
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let id = held(dir.path());
+        let out = claimdag(dir.path(), &[verb, &id, "--actor", NOBODY]);
         assert!(
-            stderr(&out).contains("--actor"),
-            "{args:?} did not say what is missing: {}",
+            out.status.success(),
+            "{verb} stopped on the zero id: {}",
+            stderr(&out)
+        );
+        assert!(
+            stderr(&out).starts_with("allow\twarn\tno-actor\t"),
+            "{}",
             stderr(&out)
         );
     }
-    for verb in ["release", "complete"] {
-        let out = claimdag(dir.path(), &[verb, &id, "--actor", NOBODY]);
-        assert!(!out.status.success(), "{verb} took the zero actor");
-        assert!(stderr(&out).contains("no actor"), "{}", stderr(&out));
-    }
-    assert_eq!(assignee(dir.path(), &id), SEAT_A, "the claim moved");
-    assert!(!dir.path().join("forced.log").exists());
 }
 
 #[test]
-fn another_seat_still_cannot_release() {
+fn another_seat_releases_and_is_labeled() {
     let dir = tempfile::tempdir().unwrap();
     let id = held(dir.path());
     let out = claimdag(dir.path(), &["release", &id, "--actor", SEAT_B]);
-    assert!(!out.status.success());
-    assert!(stderr(&out).contains("not assignee"), "{}", stderr(&out));
-    let out = claimdag(dir.path(), &["release", &id, "--actor", SEAT_A]);
     assert!(out.status.success(), "{}", stderr(&out));
+    assert!(
+        stderr(&out).starts_with("allow\twarn\tnot-assignee\trelease "),
+        "{}",
+        stderr(&out)
+    );
+    assert!(
+        stderr(&out).contains(&format!("holder {SEAT_A}")),
+        "{}",
+        stderr(&out)
+    );
+    assert_eq!(assignee(dir.path(), &id), NOBODY);
 }
 
 #[test]

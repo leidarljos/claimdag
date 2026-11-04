@@ -70,21 +70,16 @@ fn unknown_id(verb: &str, id: WorkId) -> String {
     format!("{verb}: unknown id {}. claimdag list --all", id.to_hex())
 }
 
-/// The actor is not the holder.
+/// Who asked, and who holds the node, for a warning on a call that still runs.
 ///
 /// `updated_unix` is the lease clock: claim, renew and running all write it,
-/// so it is the second this holder was last recorded. `set_running` has no
-/// command-line verb, so that refusal says who may call it.
-fn not_assignee(verb: &str, node: &WorkNode) -> String {
-    let id = node.id.to_hex();
-    let holder = node.assignee.to_hex();
-    let command = if verb == "running" {
-        format!("pass actor {holder} to set_running")
-    } else {
-        format!("claimdag {verb} {id} --actor {holder}")
-    };
+/// so it is the second this holder was last recorded.
+fn mismatch_detail(verb: &str, node: &WorkNode, actor: WorkId) -> String {
     format!(
-        "{verb}: not assignee. node {id} is held by {holder} since unix {}. {command}",
+        "{verb} {} actor {} holder {} since {}",
+        node.id.to_hex(),
+        actor.to_hex(),
+        node.assignee.to_hex(),
         node.updated_unix
     )
 }
@@ -438,6 +433,8 @@ pub struct WorkGraph {
     pruned_log: std::sync::OnceLock<String>,
     /// The finished nodes this graph dropped itself, oldest first.
     dropped: Vec<(WorkId, WorkStatus)>,
+    /// Warnings from calls that ran. Not stored in `work.bin`.
+    warnings: Vec<String>,
 }
 
 /// Why a seat's work graph could not be read.
@@ -554,6 +551,17 @@ impl WorkGraph {
         v
     }
 
+    /// Record that a call ran which names a different holder, or nobody.
+    fn note(&mut self, rule: &'static str, detail: String) {
+        self.warnings.push(crate::label::line(rule, &detail));
+    }
+
+    /// Warnings recorded on this graph since it was loaded, oldest first.
+    #[must_use]
+    pub fn warnings(&self) -> &[String] {
+        &self.warnings
+    }
+
     fn push_ledger(&mut self, work_id: WorkId, actor: WorkId, op: &'static str) {
         self.next_seq = self.next_seq.saturating_add(1);
         self.ledger.push_back(WorkLedgerEntry {
@@ -636,39 +644,6 @@ impl WorkGraph {
                 status.as_str()
             ),
         }
-    }
-
-    /// A release or complete that names nobody.
-    ///
-    /// The holder, when there is one, is who `--actor` has to name.
-    /// `updated_unix` is the lease clock, so it is the second that holder was
-    /// last recorded. `--force` is the logged way to act for nobody; the
-    /// command line appends that call to `forced.log`.
-    fn no_actor(&self, verb: &str, id: WorkId) -> String {
-        let Some(node) = self.nodes.get(&id) else {
-            return format!(
-                "{verb}: no actor. unknown id {}. claimdag list --all",
-                id.to_hex()
-            );
-        };
-        let id_hex = node.id.to_hex();
-        if !node.assignee.is_zero() {
-            let holder = node.assignee.to_hex();
-            return format!(
-                "{verb}: no actor. node {id_hex} is held by {holder} since unix {}. claimdag {verb} {id_hex} --actor {holder}. claimdag {verb} {id_hex} --force acts for nobody and is logged to forced.log",
-                node.updated_unix
-            );
-        }
-        if verb == "complete" {
-            // Nobody holds it, and it can still be finished. `--force` is the
-            // command that does that without inventing an actor.
-            return format!(
-                "{verb}: no actor. node {id_hex} has no holder. claimdag {verb} {id_hex} --force acts for nobody and is logged to forced.log"
-            );
-        }
-        // Release applies to a live claim. With no holder the status check
-        // refuses the call either way, so the next step is to read the node.
-        format!("{verb}: no actor. node {id_hex} has no holder. claimdag get {id_hex}")
     }
 
     /// What an upsert is asserting about a node.
@@ -1289,19 +1264,25 @@ impl WorkGraph {
 
     /// Hand one claim back on purpose. The node returns to `ready`, the
     /// assignee clears, and the generation moves, exactly as a reclaim does:
-    /// the holder chose to stop before the lease ran out. Only the holder may
-    /// do it. A zero actor is refused; [`WorkGraph::release_forced`] is the
-    /// explicit way to hand back a claim for nobody.
+    /// the holder chose to stop before the lease ran out. A zero actor still
+    /// hands it back and records `no-actor`. An actor who is not the holder
+    /// still hands it back and records `not-assignee`.
+    /// [`WorkGraph::release_forced`] is the explicit way to hand back a claim
+    /// for nobody without that warning.
     ///
     /// A node prune dropped after it finished is held by nobody already, so
     /// releasing it succeeds, changes nothing, and answers generation 0;
     /// [`WorkGraph::pruned`] says which status it finished with.
     pub fn release(&mut self, id: WorkId, actor: WorkId) -> Result<u64, String> {
-        if actor.is_zero() {
-            return Err(self.no_actor("release", id));
+        let nobody = actor.is_zero();
+        let (generation, holder) = self.release_as(id, actor, nobody)?;
+        if nobody {
+            self.note(
+                "no-actor",
+                format!("release {} holder {}", id.to_hex(), holder.to_hex()),
+            );
         }
-        self.release_as(id, actor, false)
-            .map(|(generation, _)| generation)
+        Ok(generation)
     }
 
     /// Hand a claim back whoever holds it. The ledger records the op as
@@ -1320,16 +1301,24 @@ impl WorkGraph {
         if self.pruned(id).is_some() {
             return Ok((0, WorkId::ZERO));
         }
+        let mismatch = {
+            let node = self
+                .nodes
+                .get(&id)
+                .ok_or_else(|| unknown_id("release", id))?;
+            if !matches!(node.status, WorkStatus::Claimed | WorkStatus::Running) {
+                return Err(format!("release: status {}", node.status.as_str()));
+            }
+            (!forced && !node.assignee.is_zero() && node.assignee != actor)
+                .then(|| mismatch_detail("release", node, actor))
+        };
+        if let Some(detail) = mismatch {
+            self.note("not-assignee", detail);
+        }
         let node = self
             .nodes
             .get_mut(&id)
             .ok_or_else(|| unknown_id("release", id))?;
-        if !matches!(node.status, WorkStatus::Claimed | WorkStatus::Running) {
-            return Err(format!("release: status {}", node.status.as_str()));
-        }
-        if !forced && !node.assignee.is_zero() && node.assignee != actor {
-            return Err(not_assignee("release", node));
-        }
         let holder = node.assignee;
         node.status = WorkStatus::Ready;
         node.assignee = WorkId::ZERO;
@@ -1369,34 +1358,50 @@ impl WorkGraph {
     /// Move the lease forward. The generation stays: a renewal is not a change
     /// of ownership.
     pub fn renew(&mut self, id: WorkId, actor: WorkId) -> Result<u64, String> {
+        let mismatch = {
+            let node = self.nodes.get(&id).ok_or_else(|| unknown_id("renew", id))?;
+            if !matches!(node.status, WorkStatus::Claimed | WorkStatus::Running) {
+                return Err(format!("renew: status {}", node.status.as_str()));
+            }
+            // A zero actor is the command line's default and moves the lease
+            // without a warning. A named actor who is not the holder still
+            // moves it, and the warning names both.
+            (!node.assignee.is_zero() && !actor.is_zero() && node.assignee != actor)
+                .then(|| mismatch_detail("renew", node, actor))
+        };
+        if let Some(detail) = mismatch {
+            self.note("not-assignee", detail);
+        }
         let node = self
             .nodes
             .get_mut(&id)
             .ok_or_else(|| unknown_id("renew", id))?;
-        if !matches!(node.status, WorkStatus::Claimed | WorkStatus::Running) {
-            return Err(format!("renew: status {}", node.status.as_str()));
-        }
-        if !node.assignee.is_zero() && !actor.is_zero() && node.assignee != actor {
-            return Err(not_assignee("renew", node));
-        }
         node.updated_unix = Self::now();
         Ok(node.cas_gen)
     }
 
     pub fn set_running(&mut self, id: WorkId, actor: WorkId) -> Result<(), String> {
+        let mismatch = {
+            let node = self
+                .nodes
+                .get(&id)
+                .ok_or_else(|| unknown_id("running", id))?;
+            if !matches!(node.status, WorkStatus::Claimed | WorkStatus::Running) {
+                return Err(format!("running: status {}", node.status.as_str()));
+            }
+            // A zero actor is the command line's default. A named actor who
+            // is not the holder still marks the node running, and the warning
+            // names both, so the ledger's actor can be read against it.
+            (!node.assignee.is_zero() && !actor.is_zero() && node.assignee != actor)
+                .then(|| mismatch_detail("running", node, actor))
+        };
+        if let Some(detail) = mismatch {
+            self.note("not-assignee", detail);
+        }
         let node = self
             .nodes
             .get_mut(&id)
             .ok_or_else(|| unknown_id("running", id))?;
-        if !matches!(node.status, WorkStatus::Claimed | WorkStatus::Running) {
-            return Err(format!("running: status {}", node.status.as_str()));
-        }
-        // The same question complete asks, and it has to answer the same way,
-        // or the ledger records a stranger as having started somebody's work.
-        // A zero actor is the command line's escape, as it is there.
-        if !node.assignee.is_zero() && !actor.is_zero() && node.assignee != actor {
-            return Err(not_assignee("running", node));
-        }
         node.status = WorkStatus::Running;
         node.updated_unix = Self::now();
         self.push_ledger(id, actor, "running");
@@ -1405,9 +1410,10 @@ impl WorkGraph {
 
     /// Finish a node. `expected_gen` is the fencing token from the claim: the
     /// generation moves on every claim and reclaim, so a stale holder is
-    /// refused. `None` skips the check. A zero actor is refused;
-    /// [`WorkGraph::complete_forced`] is the explicit way to finish a node
-    /// for nobody.
+    /// refused. `None` skips the check. A zero actor still finishes the node
+    /// and records `no-actor`. An actor who is not the holder still finishes
+    /// it and records `not-assignee`. [`WorkGraph::complete_forced`] is the
+    /// explicit way to finish a node for nobody without that warning.
     ///
     /// A node prune dropped after it finished is as finished as it gets, so
     /// completing it again succeeds and changes nothing, as it does for a
@@ -1421,11 +1427,15 @@ impl WorkGraph {
         actor: WorkId,
         expected_gen: Option<u64>,
     ) -> Result<(), String> {
-        if actor.is_zero() {
-            return Err(self.no_actor("complete", id));
+        let nobody = actor.is_zero();
+        let holder = self.complete_as(id, status, summary, actor, expected_gen, nobody)?;
+        if nobody {
+            self.note(
+                "no-actor",
+                format!("complete {} holder {}", id.to_hex(), holder.to_hex()),
+            );
         }
-        self.complete_as(id, status, summary, actor, expected_gen, false)
-            .map(|_| ())
+        Ok(())
     }
 
     /// Finish a node whoever holds it. Dependencies and `expected_gen` are
@@ -1460,36 +1470,56 @@ impl WorkGraph {
             return Ok(WorkId::ZERO);
         }
         let now = Self::now();
-        let node = self
-            .nodes
-            .get_mut(&id)
-            .ok_or_else(|| unknown_id("complete", id))?;
-        if let Some(g) = expected_gen {
-            if node.cas_gen != g {
-                return Err("complete: gen mismatch".into());
+        let mut mismatch = {
+            let node = self
+                .nodes
+                .get(&id)
+                .ok_or_else(|| unknown_id("complete", id))?;
+            if let Some(g) = expected_gen {
+                if node.cas_gen != g {
+                    return Err("complete: gen mismatch".into());
+                }
             }
-        }
-        // Whoever held it may still speak for it; checked before the terminal
-        // case so a stranger cannot rewrite a finished node.
-        if !forced && !node.assignee.is_zero() && node.assignee != actor {
-            return Err(not_assignee("complete", node));
-        }
-        let holder = node.assignee;
-        if node.status.is_terminal() {
-            if !summary.is_empty() {
+            (!forced && !node.assignee.is_zero() && node.assignee != actor)
+                .then(|| mismatch_detail("complete", node, actor))
+        };
+        // The node borrow ends with this block, so the warning and the
+        // dependency walk can use the graph afterwards.
+        let (holder, terminal, deps) = {
+            let node = self
+                .nodes
+                .get_mut(&id)
+                .ok_or_else(|| unknown_id("complete", id))?;
+            let holder = node.assignee;
+            let terminal = node.status.is_terminal();
+            if terminal && !summary.is_empty() {
                 node.summary = summary.to_string();
+            }
+            let deps = if terminal || status != WorkStatus::Done {
+                Vec::new()
+            } else {
+                node.deps.clone()
+            };
+            (holder, terminal, deps)
+        };
+        if terminal {
+            if let Some(detail) = mismatch.take() {
+                self.note("not-assignee", detail);
             }
             return Ok(holder);
         }
         // Done says the work is finished, and work that waits on unfinished
         // work is not. Failed and cancelled stay open: giving up on a node
-        // does not need what it waits on.
+        // does not need what it waits on. The warning is recorded only once
+        // the finish is applied.
         if status == WorkStatus::Done {
-            let deps = node.deps.clone();
             let open = self.unfinished_deps(&deps);
             if !open.is_empty() {
                 return Err(format!("complete: deps unfinished {}", open.join(" ")));
             }
+        }
+        if let Some(detail) = mismatch.take() {
+            self.note("not-assignee", detail);
         }
         let node = self
             .nodes
@@ -1631,6 +1661,7 @@ impl WorkGraph {
                     pruned_path: Some(dir.join(PRUNED_FILE)),
                     pruned_log: std::sync::OnceLock::new(),
                     dropped: Vec::new(),
+                    warnings: Vec::new(),
                 };
                 for node in nodes {
                     g.nodes.insert(node.id, node);
@@ -1845,15 +1876,19 @@ mod tests {
             .claim(b, x, None)
             .unwrap_err()
             .starts_with("claim: assignee busy"));
-        // A stranger cannot hand back somebody else's work.
-        let refused = g.release(a, y).unwrap_err();
-        assert!(
-            refused.starts_with("release: not assignee")
-                && refused.contains(&a.to_hex())
-                && refused.contains(&x.to_hex()),
-            "{refused}"
+        // Someone other than the holder hands the claim back, and the warning
+        // names both. The holder is then free to take other work.
+        let since = g.get(a).unwrap().updated_unix;
+        let generation = g.release(a, y).unwrap();
+        assert_eq!(
+            g.warnings(),
+            &[format!(
+                "allow\twarn\tnot-assignee\trelease {} actor {} holder {} since {since}",
+                a.to_hex(),
+                y.to_hex(),
+                x.to_hex()
+            )]
         );
-        let generation = g.release(a, x).unwrap();
         let after = g.get(a).unwrap();
         assert_eq!(after.status, WorkStatus::Ready);
         assert!(after.assignee.is_zero());
