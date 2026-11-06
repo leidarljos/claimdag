@@ -91,4 +91,4 @@ $ CLAIMDAG_DIR=/var/lib/seat claimdag-tui
 Docs: [docs/orgmode/architecture.org](docs/orgmode/architecture.org).
 Schema: [schema/claimdag.capnp](schema/claimdag.capnp).
 
-License: Apache-2.0 OR MIT.
+License: MIT OR Apache-2.0.
