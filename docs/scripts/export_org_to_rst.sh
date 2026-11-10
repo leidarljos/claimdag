@@ -20,6 +20,11 @@ if [[ "$exporter" == "auto" ]]; then
   fi
 fi
 
+# The API page and the changelog page are generated from the crate and from
+# CHANGELOG.md. Both are org sources, so they export with everything else.
+python3 docs/scripts/gen-api.py
+python3 docs/scripts/sync-changelog.py
+
 # Before the export, because both classes this catches produce valid output
 # that renders wrong, so nothing downstream will complain about them.
 python3 docs/scripts/check_org.py

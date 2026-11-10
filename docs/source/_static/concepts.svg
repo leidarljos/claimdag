@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 360" role="img" aria-labelledby="conceptsTitle conceptsDesc">
+  <title id="conceptsTitle">A parent node and a child node</title>
+  <desc id="conceptsDesc">The node parse the manifest header is done at generation 2. The node reject a manifest with no header hangs under it and depends on it, and is ready at generation 1.</desc>
+  <style>
+    .box { fill: #efe9dc; stroke: #15130f; stroke-width: 1.5; }
+    .ink { fill: #15130f; font-family: "Source Sans 3", "Source Sans Pro", sans-serif; }
+    .mute { fill: #47423a; font-family: "Source Sans 3", "Source Sans Pro", sans-serif; }
+    .accent { fill: #7f520b; font-family: "Source Sans 3", "Source Sans Pro", sans-serif; font-weight: 600; }
+    .edge { fill: none; stroke: #15130f; stroke-width: 1.5; }
+  </style>
+  <rect class="box" x="36" y="78" width="280" height="96" rx="6"/>
+  <text class="ink" x="52" y="108" font-size="16">parse the manifest header</text>
+  <text class="mute" x="52" y="132" font-size="14">status done</text>
+  <text class="mute" x="52" y="154" font-size="14">generation 2</text>
+  <rect class="box" x="564" y="78" width="280" height="96" rx="6"/>
+  <text class="ink" x="580" y="108" font-size="16">reject a manifest with no header</text>
+  <text class="mute" x="580" y="132" font-size="14">status ready</text>
+  <text class="mute" x="580" y="154" font-size="14">generation 1</text>
+  <path class="edge" d="M316 110 H548"/>
+  <polygon points="548,110 536,104 536,116" fill="#15130f"/>
+  <text class="accent" x="432" y="100" font-size="13" text-anchor="middle">dependency</text>
+  <path class="edge" d="M316 150 H548"/>
+  <polygon points="548,150 536,144 536,156" fill="#15130f"/>
+  <text class="accent" x="432" y="172" font-size="13" text-anchor="middle">parent</text>
+  <text class="ink" x="36" y="230" font-size="15">dependency: the child stays todo until the parent is done.</text>
+  <text class="ink" x="36" y="254" font-size="15">parent: the pane draws the child under the parent.</text>
+  <text class="ink" x="36" y="278" font-size="15">claim wrote generation 2 on the parent and returned that number.</text>
+  <text class="ink" x="36" y="318" font-size="15">complete --gen 2 finishes the parent only while it is still generation 2.</text>
+</svg>

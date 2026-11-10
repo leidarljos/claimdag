@@ -1,3 +1,7 @@
+Verbs, statuses, and the snapshot file. The :doc:`API reference <api>`
+is the library. The :doc:`concepts <concepts>` page is the model these
+verbs change. Worked sequences are the :doc:`how-to guides <howto>`.
+
 Command line
 ============
 
@@ -29,6 +33,7 @@ The verbs and flags below are what ``claimdag --help`` and each verb's
      unlink      Drop a boolean hard dependency. Missing edge is ok
      archive     Soft-hide a terminal node. Not a delete
      unarchive   Clear the archive flag. Status stays terminal
+     where       Print every location the graph can be in, in the order they are tried: the directory, whether it is in use, holds work or has no graph, and the rule that names it
      help        Print this message or the help of the given subcommand(s)
 
    Options:
@@ -284,10 +289,19 @@ The verbs and flags below are what ``claimdag --help`` and each verb's
          --actor <ACTOR>  [default: 00000000000000000000000000000000]
      -h, --help           Print help
 
+   $ claimdag where --help
+   Print every location the graph can be in, in the order they are tried: the directory, whether it is in use, holds work or has no graph, and the rule that names it
+
+   Usage: claimdag where [OPTIONS]
+
+   Options:
+         --move  Move the graph in use into the first default location, when the defaults picked a later one because only it held a graph
+     -h, --help  Print help
+
 Ids are 32 lowercase hex characters (xxHash3-128). The zero id means unset.
 
 A ``release`` or ``complete`` with no actor still runs.
-So does a ``release``, ``complete`` or ``renew`` whose actor is not the holder.
+So does a ``release``, ``complete`` or ``renew`` for a different actor.
 The line on stderr and in ``warn.log`` is ``allow``, then ``warn``, then the rule.
 The rule is ``no-actor`` or ``not-assignee``.
 The fields are separated by tabs.
@@ -306,15 +320,21 @@ earlier completion is kept on disk.
 Statuses
 ========
 
-``todo``, ``ready``, ``claimed``, ``done``, ``failed``, ``cancelled``. ``ready`` is
-derived: a ``todo`` node whose every dependency is terminal. A claim requires
-``ready``. One live claim per assignee.
+``todo``, ``ready``, ``claimed``, ``running``, ``blocked``, ``done``, ``failed``,
+``cancelled``. ``ready`` is derived: a ``todo`` or ``blocked`` node whose every
+dependency is ``done``. ``failed`` and ``cancelled`` leave a dependent at
+``todo``. A claim requires ``ready``. One live claim per
+assignee. ``running`` is written by ``WorkGraph::set_running``. The command
+line has no verb for it. ``done``, ``failed``, and ``cancelled`` are terminal.
+The :doc:`concepts <concepts>` page is the full table.
 
 Kinds and roles
 ===============
 
-Kinds: ``task`` and the closed set the schema names. Roles: ``unset`` and the
-closed set the schema names. Summary is the one open text field.
+Kinds: ``unset``, ``goal``, ``step``, ``task``, ``molecule``. The default is ``task``.
+Roles: ``unset``, ``explore``, ``architect``, ``implementor``, ``verifier``,
+``orchestrator``, ``general``. The default is ``unset``. Summary is the one open
+text field.
 
 The snapshot
 ============
@@ -327,11 +347,13 @@ a reader.
 Environment
 ===========
 
-================ ==============================================================================================================================================
-Variable         Meaning
-================ ==============================================================================================================================================
-``CLAIMDAG_DIR`` the graph directory; else ``$XDG_RUNTIME_DIR/claimdag``, then ``$XDG_STATE_HOME/claimdag``, ``~/.local/state/claimdag``, ``/tmp/claimdag-UID``
-================ ==============================================================================================================================================
+==================== ======================================================================================================================================================================
+Variable             Meaning
+==================== ======================================================================================================================================================================
+``CLAIMDAG_DIR``     the graph directory; else ``$XDG_RUNTIME_DIR/claimdag``, then ``$XDG_STATE_HOME/claimdag``, ``~/.local/state/claimdag``, ``/tmp/claimdag-UID``, then ``/tmp/claimdag``
+``CLAIMDAG_ACTOR``   32-hex id the pane claims as. With it unset, the pane derives an id from the user and the host
+``CLAIMDAG_HANDLES`` path to a JSON map of actor ids to names. Else ``handles.json`` in the graph directory
+==================== ======================================================================================================================================================================
 
 Crates
 ======

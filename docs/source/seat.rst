@@ -3,9 +3,9 @@
 In the seat
 ===========
 
-This crate is one habitat. The seat that sits on it is
-`ljos <https://leidarljos.github.io>`__. Citation is not a merge. Completing a
-session node does not close a ticket.
+This crate is one habitat. The :doc:`explanation <explanation>` is what
+the graph keeps and what the tracker keeps. The seat that sits on it is
+`ljos <https://leidarljos.github.io>`__. Citing a deed names it; the bytes stay in deedar. The ticket stays open until the tracker closes it.
 
 ============================================= ============== =============================================================
 Question                                      Crate          Site

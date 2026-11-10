@@ -11,8 +11,8 @@ _ROOT = _DOCS.parent.parent
 _ORG = _DOCS.parent / "orgmode"
 
 project = "claimdag"
-copyright = "2026, Rohit Goswami"
-author = "Rohit Goswami"
+copyright = "claimdag developers"
+author = "claimdag developers"
 # cog writes these from [workspace.package] version in the workspace Cargo.toml.
 # [[[cog import claimdag_version as v; cog.out(v.sphinx_lines()) ]]]
 release = "0.8.0"
@@ -60,10 +60,12 @@ html_theme_options = {
     "github_url": "https://github.com/leidarljos/claimdag",
     "og_image_url": _OG_IMAGE,
     "nav_links": [
-        {"title": "Get started", "url": "getting-started"},
+        {"title": "Install", "url": "install"},
+        {"title": "Tutorial", "url": "getting-started"},
         {"title": "How-to", "url": "howto"},
+        {"title": "Topics", "url": "topics"},
         {"title": "Reference", "url": "reference"},
-        {"title": "Explanation", "url": "explanation"},
+        {"title": "Changelog", "url": "changelog"},
         {"title": "Search", "url": "search"},
     ],
 }

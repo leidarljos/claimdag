@@ -2,6 +2,10 @@
 #+description: Verbs, statuses, and the snapshot file.
 #+options: toc:nil num:nil
 
+Verbs, statuses, and the snapshot file. The [[file:api.org][API reference]]
+is the library. The [[file:concepts.org][concepts]] page is the model these
+verbs change. Worked sequences are the [[file:howto.org][how-to guides]].
+
 * Command line
 
 =claimdag [--dir DIR] VERB=
@@ -329,7 +333,7 @@ Options:
 Ids are 32 lowercase hex characters (xxHash3-128). The zero id means unset.
 
 A =release= or =complete= with no actor still runs.
-So does a =release=, =complete= or =renew= whose actor is not the holder.
+So does a =release=, =complete= or =renew= for a different actor.
 The line on stderr and in =warn.log= is =allow=, then =warn=, then the rule.
 The rule is =no-actor= or =not-assignee=.
 The fields are separated by tabs.
@@ -347,14 +351,20 @@ earlier completion is kept on disk.
 
 * Statuses
 
-=todo=, =ready=, =claimed=, =done=, =failed=, =cancelled=. =ready= is
-derived: a =todo= node whose every dependency is terminal. A claim requires
-=ready=. One live claim per assignee.
+=todo=, =ready=, =claimed=, =running=, =blocked=, =done=, =failed=,
+=cancelled=. =ready= is derived: a =todo= or =blocked= node whose every
+dependency is =done=. =failed= and =cancelled= leave a dependent at
+=todo=. A claim requires =ready=. One live claim per
+assignee. =running= is written by =WorkGraph::set_running=. The command
+line has no verb for it. =done=, =failed=, and =cancelled= are terminal.
+The [[file:concepts.org][concepts]] page is the full table.
 
 * Kinds and roles
 
-Kinds: =task= and the closed set the schema names. Roles: =unset= and the
-closed set the schema names. Summary is the one open text field.
+Kinds: =unset=, =goal=, =step=, =task=, =molecule=. The default is =task=.
+Roles: =unset=, =explore=, =architect=, =implementor=, =verifier=,
+=orchestrator=, =general=. The default is =unset=. Summary is the one open
+text field.
 
 * The snapshot
 
@@ -367,7 +377,9 @@ a reader.
 
 | Variable | Meaning |
 |---+---|
-| =CLAIMDAG_DIR= | the graph directory; else =$XDG_RUNTIME_DIR/claimdag=, then =$XDG_STATE_HOME/claimdag=, =~/.local/state/claimdag=, =/tmp/claimdag-UID= |
+| =CLAIMDAG_DIR= | the graph directory; else =$XDG_RUNTIME_DIR/claimdag=, then =$XDG_STATE_HOME/claimdag=, =~/.local/state/claimdag=, =/tmp/claimdag-UID=, then =/tmp/claimdag= |
+| =CLAIMDAG_ACTOR= | 32-hex id the pane claims as. With it unset, the pane derives an id from the user and the host |
+| =CLAIMDAG_HANDLES= | path to a JSON map of actor ids to names. Else =handles.json= in the graph directory |
 
 * Crates
 

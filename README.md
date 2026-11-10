@@ -13,10 +13,14 @@ Docs: https://leidarljos.github.io/claimdag/
 
 | Page | What it answers |
 |---|---|
+| [Install](https://leidarljos.github.io/claimdag/install.html) | Linux and macOS archives, and a source build |
 | [Getting started](https://leidarljos.github.io/claimdag/getting-started.html) | Upsert, claim, complete on a scratch graph |
 | [How-to](https://leidarljos.github.io/claimdag/howto.html) | Leases, release, ready |
+| [Concepts](https://leidarljos.github.io/claimdag/concepts.html) | Nodes, the parent edge, the dependency, the generation |
 | [Reference](https://leidarljos.github.io/claimdag/reference.html) | Verbs, generation, snapshot |
-| [Explanation](https://leidarljos.github.io/claimdag/explanation.html) | Why completing does not close a ticket |
+| [API](https://leidarljos.github.io/claimdag/api.html) | Library items generated from the crate |
+| [Explanation](https://leidarljos.github.io/claimdag/explanation.html) | Why completing leaves the tracker ticket unchanged |
+| [Changelog](https://leidarljos.github.io/claimdag/changelog.html) | What each version changed |
 
 The seat that claims through this graph is documented at https://leidarljos.github.io.
 
@@ -60,7 +64,7 @@ $ claimdag --dir /var/lib/seat archive $a
 - Ids are 128-bit `WorkId`. Kind, status, and role are closed enums.
 - Summary is the only open text field.
 - `claim` is CAS on `gen` (omit `--gen` to ignore). Terminal is sticky.
-- `archive` is a flag on a terminal node, not a new status and not a delete.
+- `archive` sets a flag on a terminal node. The status stays the terminal status it already had. The node stays in the snapshot.
 - Default `list` is live work only (`--terminal`, `--archived`, `--all`).
 - `link` is a boolean hard dependency.
 - `ready` is unblocked and unheld, deepest chain first. Take the first one.
@@ -70,7 +74,7 @@ $ claimdag --dir /var/lib/seat archive $a
 `ready` orders by the longest chain of unfinished work below a node, unit
 cost, then recency, then id: the list-scheduling priority (Hu, DOI
 10.1287/opre.9.6.841; Graham, DOI 10.1137/0117039; HEFT, DOI 10.1109/71.993206).
-Every row carries `waiting_below`, so the order is visible rather than trusted.
+Every row carries `waiting_below`, so the order is on the row.
 
 For multi-worker concurrency, `ready --balanced` and `claim-next` apply the Power
 of Two Choices (P2C) bounded by critical slack ($\Delta$). Probes are seeded with

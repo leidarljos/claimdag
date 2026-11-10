@@ -5,66 +5,107 @@
        <img class="vi-hero-mark" src="_static/mark.svg" width="64" height="64" alt="" />
        <div>
          <p class="vi-hero-name">claimdag</p>
-         <p class="vi-hero-tag">What is claimable right now?</p>
+         <p class="vi-hero-tag">CAS claim and complete on a DAG</p>
        </div>
      </div>
-     <p class="vi-hero-tagline">Compare-and-swap claims over a session's work graph, with leases.</p>
-     <div class="vi-hero-pills">
-       <span>One mutator</span>
-       <span>Leases, not locks</span>
-       <span>CLI + TUI + MCP</span>
-     </div>
      <div class="vi-hero-actions">
-       <a class="vi-btn vi-btn-gold" href="getting-started.html">Get started</a>
-       <a class="vi-btn vi-btn-ghost" href="reference.html">Reference</a>
+       <a class="vi-btn vi-btn-gold" href="getting-started.html">Tutorial</a>
+       <a class="vi-btn vi-btn-ghost" href="install.html">Install</a>
      </div>
    </div>
 
-A session hands out work. Two or more workers ask the same question at once:
-what is unblocked and unheld? claimdag answers from a small graph of nodes
-with hard dependencies. A claim is compare-and-swap on the node's
-generation, so two workers cannot both take it. A claim is a lease, so a
-worker that dies gives the node back. Completing a node here does not close
-a ticket anywhere; the tracker is a different store.
+claimdag hands work to callers from a directed acyclic graph of nodes. A
+claim is compare-and-swap on the node's generation, so a second caller
+finds the node held. The holder finishes the node, or the lease returns
+it, and a node whose dependencies are all done becomes ready. One
+process mutates the graph. The snapshot is unpacked Cap'n Proto in
+``work.bin``, and readers map that file.
 
-Install
-=======
+Why
+===
 
-.. code:: console
+A holder that exits without ``release`` leaves the node claimed. One
+assignee has at most one live node, so that identity takes nothing else
+while the claim stands. The lease is the bound on that quiet time:
+``renew`` records that the holder is still there, and ``reclaim`` returns
+every claim that has been quiet longer than the lease, moving the
+generation. A later ``complete --gen`` from the old holder is refused. The
+graph answers which session node is held, and by whom. The tracker keeps
+the ticket.
 
-   $ cargo binstall claimdag-cli
-   $ cargo binstall claimdag-mcp   # optional
-   $ cargo binstall claimdag-tui   # optional pane
+.. raw:: html
 
-The graph lives in ``$XDG_RUNTIME_DIR/claimdag`` unless ``CLAIMDAG_DIR`` or
-``--dir`` says otherwise. It is session state there, gone when the session
-ends. With no runtime directory it goes to ``$XDG_STATE_HOME/claimdag``, else
-``~/.local/state/claimdag``, else ``/tmp/claimdag-UID``, and the state
-directory keeps it across sessions.
-
-First minute
-============
-
-.. code:: console
-
-   $ a=$(claimdag upsert --summary "parse the manifest header")
-   $ claimdag claim $a --assignee $(printf '%032x' 7)
-   gen=2
-   $ claimdag list
-   092dca29...  claimed  task  00000000  gen=2  parse the manifest header
-   $ claimdag complete $a --status done --actor $(printf '%032x' 7)
-   092dca29...  done
-
-The :doc:`tutorial <getting-started>` is this first minute, then a second node that waits on the first.
+   <div class="vi-cards">
+     <a class="vi-card" href="install.html">
+       <span class="vi-card-title">Installation</span>
+       <span class="vi-card-text">Prebuilt archives for Linux and macOS, and a build from source.</span>
+     </a>
+     <a class="vi-card" href="getting-started.html">
+       <span class="vi-card-title">Tutorial</span>
+       <span class="vi-card-text">Two nodes, one claim, a lease, and the child becoming ready.</span>
+     </a>
+     <a class="vi-card" href="howto.html">
+       <span class="vi-card-title">How-to guides</span>
+       <span class="vi-card-text">Directory, claim-next, leases, archive, the pane, and the server.</span>
+     </a>
+     <a class="vi-card" href="topics.html">
+       <span class="vi-card-title">Topics</span>
+       <span class="vi-card-text">The model, why a generation fences a stale holder, and the on-disk snapshot.</span>
+     </a>
+     <a class="vi-card" href="reference.html">
+       <span class="vi-card-title">Reference</span>
+       <span class="vi-card-text">Command line, statuses, and the generated library API.</span>
+     </a>
+     <a class="vi-card" href="changelog.html">
+       <span class="vi-card-title">Changelog</span>
+       <span class="vi-card-text">What each published version changed.</span>
+     </a>
+   </div>
 
 .. toctree::
    :maxdepth: 1
-   :caption: Guides
+   :caption: Install
    :hidden:
 
+   install
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Tutorials
+   :hidden:
+
+   tutorials
    getting-started
+
+.. toctree::
+   :maxdepth: 1
+   :caption: How-to guides
+   :hidden:
+
    howto
-   reference
+   howto-dir
+   howto-take
+   howto-lease
+   howto-archive
+   howto-pane
+   howto-mcp
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Topics
+   :hidden:
+
+   topics
+   concepts
    explanation
    architecture
    seat
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Reference
+   :hidden:
+
+   reference
+   api
+   changelog

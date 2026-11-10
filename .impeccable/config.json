@@ -49,6 +49,15 @@
         "reason": "The doubled hyphens on this page are command flags inside code. The page has no em dash."
       },
       {
+        "rule": "em-dash-overuse",
+        "value": "*",
+        "files": [
+          "docs/build/*.html"
+        ],
+        "createdAt": "2026-11-10T14:30:00.000Z",
+        "reason": "Doubled hyphens on these pages are command flags inside code. The pages have no em dash."
+      },
+      {
         "rule": "cream-palette",
         "value": "*",
         "files": [

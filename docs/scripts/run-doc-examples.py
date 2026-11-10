@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the README and getting-started console blocks in a scratch directory.
+"""Run the README and the documented console blocks in a scratch directory.
 
 A line the page shows succeeding has to exit 0, and the lines under it have
 to be what the program prints. A line whose shown output is a refusal has
@@ -28,6 +28,12 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 PAGES = (
     ROOT / "README.md",
     ROOT / "docs" / "orgmode" / "getting-started.org",
+    ROOT / "docs" / "orgmode" / "howto-dir.org",
+    ROOT / "docs" / "orgmode" / "howto-take.org",
+    ROOT / "docs" / "orgmode" / "howto-lease.org",
+    ROOT / "docs" / "orgmode" / "howto-archive.org",
+    ROOT / "docs" / "orgmode" / "howto-pane.org",
+    ROOT / "docs" / "orgmode" / "explanation.org",
 )
 
 # The directories the two pages name. CI has no /var/lib/seat, and
@@ -301,7 +307,7 @@ def main() -> int:
         for problem in problems:
             print(f"run-doc-examples: {problem}", flush=True)
         return 1
-    print("run-doc-examples: README and getting-started commands ran", flush=True)
+    print("run-doc-examples: documented commands ran", flush=True)
     return 0
 
 

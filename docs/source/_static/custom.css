@@ -469,6 +469,36 @@ body::before {
   border-color: var(--ll-accent-soft);
 }
 
+.vi-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15.5rem, 1fr));
+  gap: 0.9rem;
+  margin: 0.4rem 0 1.6rem;
+}
+.vi-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-height: 7.5rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--ll-line-2);
+  border-radius: 4px;
+  background: var(--ll-panel);
+  text-decoration: none !important;
+  color: var(--ll-fg) !important;
+}
+.vi-card:hover { border-color: var(--ll-accent-soft); }
+.vi-card-title {
+  font-family: var(--ll-serif);
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: var(--ll-fg);
+}
+.vi-card-text {
+  color: var(--ll-mute);
+  line-height: 1.45;
+}
+
 /* The shared footer: the seven crates, then the analytics line. */
 .ll-foot {
   border-top: 1px solid var(--ll-line);

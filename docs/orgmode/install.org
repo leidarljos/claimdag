@@ -1,0 +1,79 @@
+#+title: Installation
+#+description: Install claimdag on Linux and macOS from a release archive or from source.
+#+options: toc:nil num:nil
+
+=claimdag= is the command line. =claimdag-mcp= is the server. =claimdag-tui=
+is the pane. Each one reads and writes the same =work.bin=.
+
+The [[file:getting-started.org][tutorial]] assumes =claimdag= is on =PATH=. The
+[[file:reference.org][reference]] is the command line those binaries implement.
+
+* Release archives
+
+The release workflow publishes one archive per target. The file name is
+=claimdag-vVERSION-TARGET.tar.gz=. Inside it, =claimdag=, =claimdag-mcp= and
+=claimdag-tui= sit next to each other. =cargo binstall= reads the
+=package.metadata.binstall= table in each crate and downloads that archive.
+
+| Target | Host |
+|---|---|
+| =x86_64-unknown-linux-gnu= | Linux, 64-bit x86 |
+| =aarch64-unknown-linux-gnu= | Linux, 64-bit ARM |
+| =aarch64-apple-darwin= | macOS, Apple silicon |
+| =x86_64-apple-darwin= | macOS, Intel |
+
+* Linux
+
+On x86_64 or aarch64 Linux, with [[https://github.com/cargo-bins/cargo-binstall][cargo-binstall]] installed:
+
+#+begin_src console
+$ cargo binstall claimdag-cli
+$ cargo binstall claimdag-mcp
+$ cargo binstall claimdag-tui
+#+end_src
+
+=cargo binstall= fetches the archive for the host target. A target with no
+archive fails there. =cargo install= builds the same names from source.
+
+* macOS
+
+On Apple silicon the target is =aarch64-apple-darwin=. On Intel it is
+=x86_64-apple-darwin=. The same three =cargo binstall= lines as on Linux
+select the archive from the host target.
+
+* From crates.io
+
+Any host with a Rust toolchain can build from crates.io. =claimdag= and
+=claimdag-cli= declare =rust-version= 1.85. =claimdag-mcp= and
+=claimdag-tui= declare =rust-version= 1.88.
+
+#+begin_src console
+$ cargo install --locked claimdag-cli
+$ cargo install --locked claimdag-mcp
+$ cargo install --locked claimdag-tui
+#+end_src
+
+=--locked= builds the dependency set recorded in the published =Cargo.lock=.
+
+* From a checkout
+
+The workspace =Cargo.toml= is the version the crates share. From the
+repository root:
+
+#+begin_src console
+$ cargo build --locked --release -p claimdag-cli -p claimdag-mcp -p claimdag-tui
+#+end_src
+
+The binaries are =target/release/claimdag=, =target/release/claimdag-mcp=
+and =target/release/claimdag-tui=. The check workflow builds and tests
+this workspace with rustc 1.97.1.
+
+A library user adds the crate:
+
+#+begin_src console
+$ cargo add claimdag
+#+end_src
+
+The [[file:api.org][API reference]] lists the items that dependency exports.
+The [[file:howto-dir.org][directory how-to]] is where the snapshot is created
+on first write.

@@ -20,9 +20,10 @@ use crate::snap::SNAP_BIN;
 /// applies, so a seat whose environment lacks one of them still reads the
 /// graph another seat started in a later one. Every default is this user's
 /// own: a shared `/tmp/claimdag` made one user's first claim fail on another
-/// user's directory. The current directory is not a default: one graph per
-/// seat is the point, and `.` puts a `work.bin` in whichever checkout
-/// somebody happened to be standing in.
+/// user's directory. The defaults are `$XDG_STATE_HOME/claimdag`,
+/// `~/.local/state/claimdag`, `/tmp/claimdag-UID`, and `/tmp/claimdag`, one
+/// set per seat, so two users on one host keep separate graphs. The working
+/// directory stays off that list, and `work.bin` stays in the seat directory.
 ///
 /// Unless `--dir` or `CLAIMDAG_DIR` named the directory, says on stderr which
 /// graph it uses when another location holds one too, once.

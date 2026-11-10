@@ -2,7 +2,8 @@
 #+description: Two nodes, one waiting on the other, and a claim a second worker cannot steal.
 #+options: toc:nil num:nil
 
-Everything below runs in a scratch directory. By the end you will have two
+Install =claimdag= from the [[file:install.org][installation]] page if it is
+not already on =PATH=. Everything below runs in a scratch directory. By the end you will have two
 nodes, one waiting on the other, and a claim a second worker cannot steal.
 You will see a stalled claim handed back by its lease, and a finished node
 unblock the next.
@@ -20,7 +21,7 @@ $ claimdag list
 #+end_src
 
 Ids are 32 hex characters, minted from the node's own fields. =link= adds a
-hard dependency: the child is not ready until the parent is terminal.
+hard dependency: the child becomes ready when the parent is done.
 Readiness is derived, never set by hand. =list= prints newest first, and
 breaks a tie on the id, so those two lines can swap.
 
@@ -60,12 +61,15 @@ $ claimdag list
 71368334...  ready  task  gen=1  reject a manifest with no header
 #+end_src
 
-The child became ready the moment its parent was terminal. Nothing here
+The child became ready the moment its parent was done. Nothing here
 touched a tracker: the ticket this work belongs to is still open until
 somebody closes it there.
 
 * Where next
 
-- [[file:howto.org][How-to]]: pick the next node by critical path, archive finished work, drive the pane.
-- [[file:reference.org][Reference]]: verbs, statuses, the snapshot file.
-- [[file:explanation.org][Explanation]]: why a claim is a lease and a generation is a fence.
+The [[file:howto.org][how-to guides]] cover the directory, =claim-next=, the
+lease, archive, the pane, and the server. The [[file:concepts.org][concepts]]
+page draws the two edges this lesson created. The
+[[file:explanation.org][explanation]] is why the generation fences a stale
+holder. The [[file:reference.org][reference]] is the command line, and the
+[[file:api.org][API reference]] is the library.

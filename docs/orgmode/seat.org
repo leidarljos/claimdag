@@ -4,7 +4,8 @@
 
 * In the seat
 
-This crate is one habitat. The seat that sits on it is
+This crate is one habitat. The [[file:explanation.org][explanation]] is what
+the graph keeps and what the tracker keeps. The seat that sits on it is
 [[https://leidarljos.github.io][ljos]]. Citing a deed names it; the bytes stay in deedar. The ticket stays open until the tracker closes it.
 
 | Question | Crate | Site |

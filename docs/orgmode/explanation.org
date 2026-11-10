@@ -2,112 +2,105 @@
 #+description: Why a claim is a lease and a generation is a fence.
 #+options: toc:nil num:nil
 
+The [[file:concepts.org][concepts]] page names the pieces. This page is why
+they are shaped this way. The [[file:howto-lease.org][lease how-to]] is the
+sequence with its output.
+
 * A claim is a lease
 
 #+ATTR_HTML: :alt A node's states: todo, ready, claimed, terminal; claim moves the generation, renew keeps it, reclaim moves it again :width 100%
 [[file:_static/lease.svg]]
 
-A claim with no expiry is a claim a crashed worker keeps. The node stays
-claimed with nobody on it, and because one assignee has at most one live
-node, that worker's identity can never claim again either. One process
-dying takes a node and an identity with it for good. So a claim is a lease:
-=release= hands a claim back on purpose, moving the generation the way a
-reclaim does, so a holder that stops is not busy until the lease runs out.
-=renew= says the holder is alive, and going quiet past the lease returns the
-node to ready for somebody else. Chubby's leases and ZooKeeper's ephemeral
-nodes answer the same question the same way; the graph has one mutator and
-no way to ask whether a worker is alive, so the only evidence is whether it
-said so recently.
+A holder that exits without =release= leaves the node claimed. One
+assignee has at most one live node, so that identity takes nothing else
+while the claim stands. =release= hands the claim back and moves the
+generation. =renew= writes a new timestamp and leaves the generation where
+it is. =reclaim= returns every claimed or running node whose timestamp is
+at least the lease seconds old, and moves the generation. Chubby's leases
+and ZooKeeper's ephemeral nodes answer a dead holder with an expiry. This
+graph has one mutator and no channel back from the worker, so the
+timestamp is the evidence that the holder is still there. The default
+lease is 900 seconds.
 
 * A generation is a fence
 
-The generation moves on every claim and every reclaim. A holder that
-stalled long enough to be reclaimed wakes up as if it still owned the
-node, and an assignee check alone does not stop it: a reclaim clears the
-assignee, and a cleared assignee is what lets anybody finish an unheld node.
-A holder that passes the generation it was given is refused exactly when
-the world moved underneath it. =renew= leaves the generation alone, because
-a renewal is not a change of ownership and moving it would invalidate the
-token the holder is about to complete with.
+The generation moves on claim, reclaim, release, reopen, archive, and
+unarchive. A holder that was reclaimed still carries the old number. A
+reclaim clears the assignee, and a cleared assignee is what lets a later
+caller finish an unheld node. Passing the generation back refuses that
+caller when the stored number has moved. =renew= leaves the generation
+alone, because a renewal keeps the same holder and moving the number would
+invalidate the token that holder is about to complete with.
 
-That number fences a stale holder only when the holder passes it back.
 =claim= moves the generation and prints the new value. =complete --gen=
-refuses with =complete: gen mismatch= when the node is no longer at
-that value. Omitting =--gen= skips the check, so a reclaimed node can
-still be finished. =reclaim=, =release=, =reopen=, =archive= and
-=unarchive= each move the generation. =renew= does not, and =complete=
-does not. Kleppmann's fencing token is that optional check
+refuses with =complete: gen mismatch= when the node is no longer at that
+value. Omitting =--gen= skips the check, so a reclaimed node can still be
+finished. =complete= itself leaves the generation where it is.
+Kleppmann's fencing token is that optional check
 ([[https://martin.kleppmann.com/2016/02/08/how-to-do-distributed-locking.html][Kleppmann]]).
 The graph, under its advisory lock, mints the number.
 
 * Readiness is derived
 
-A caller may ask for =ready= and the dependencies decide. If status could be
-asserted, it would lie to every reader who picks work from it, and the
-refusal at claim time would not help the one who believed it. The parent
-chain is checked for loops the same way a dependency edge is, so a node
-cannot be its own ancestor and a walk up the tree always ends.
+A caller may ask =upsert= for =ready=. The dependencies still decide. A
+=todo= or =blocked= node whose every dependency is =done= becomes
+=ready=. =failed= and =cancelled= do not count: the child stays =todo=.
+A =ready= node that gains a dependency other than =done= returns to
+=todo=. The parent chain is checked for a cycle the same way a dependency
+edge is, so a walk up the parents ends.
 
 * Which ready node
 
-When several nodes are ready, the one with the longest chain of work
-waiting below it is the one to take first: finishing it frees the most.
-That is the critical-path rule for scheduling a partial order on identical
-machines (Hu, doi:10.1287/opre.9.6.841; Graham, doi:10.1137/0117039), and
-the heterogeneous earliest-finish-time heuristic (HEFT) extends it to
-workers of different speeds (doi:10.1109/71.993206). Computing the depth below every node is one pass
-over the graph and costs under a millisecond at four thousand nodes.
+When several nodes are ready, the one with the longest chain of unfinished
+work below it frees the most when it finishes. That is the critical-path
+rule for a partial order on identical machines (Hu,
+doi:10.1287/opre.9.6.841; Graham, doi:10.1137/0117039). HEFT extends the
+same ranking to workers of different speeds (doi:10.1109/71.993206). One
+pass over the graph computes the depth. At four thousand nodes that pass
+is under a millisecond. =ready= prints the depth as =below=, and the
+[[file:howto-take.org][take-the-next-node]] guide is the command.
 
 * One mutator across processes
 
 Every command line and every server call that changes the graph takes an
 advisory lock on the graph directory, held from load to save. Two workers
-claiming at once serialise on it, so neither writes back a snapshot that
-lacks the other's change; readers take no lock and read the last snapshot
-whole, since it is replaced by rename.
+claiming at once take the lock one after the other, so each save includes
+the other's claim. Readers take no lock and read the last snapshot whole,
+because the file is replaced by rename. The wait is one second.
+=measurements/lock-wait.md= is why.
 
-* A scheduler, not a record
+* The session and the tracker
 
-claimdag holds the work one host process is handing out right now: who is
-on what, what is unblocked, what finished. The snapshot lives in the
-runtime directory, is capped at 4096 nodes, and prunes finished work to
-stay under the cap. Nothing here is meant to outlive the session that
-wrote it.
+claimdag holds the work one host process is handing out: who is on what,
+what is unblocked, what finished. The snapshot lives in the runtime
+directory, is capped at 4096 nodes, and prunes finished work to stay under
+the cap. The bytes belong to the session that wrote them.
 
-A plain-text issue tracker models the same shape: parent edge, hard
-dependency, holder, derived workable set, sticky terminal state. The two
-are not redundant. A record is edited by people, carries prose, and is
-kept in version control forever. A scheduler is compare-and-swap over an
-mmap. Forcing either to be the other makes the record slow or the
-scheduler unreadable. The rule for picking is the tempo, not the shape:
-an answer that has to survive the session belongs in the tracker.
+A plain-text issue tracker has a parent edge, a hard dependency, a holder,
+a derived workable set, and a sticky terminal state. A record is edited by
+people, carries prose, and stays in version control. A scheduler is
+compare-and-swap over a mapped file. The tempo picks the store. An answer
+that has to survive the session belongs in the tracker.
 
-* Citations are deliberately absent
+* What a node can name
 
-A =WorkNode= has no field that could hold a deed accession, and it is not
-getting one. The accession crosses a tracker, a memory pack and a deed
-store, all three durable. A scheduler that prunes its own finished nodes
-cannot be an end of a citation without lying about it later.
-
-What a node can do is name what it is scheduling. =summary= is the only
-open text field, so a node that stands for a tracked issue opens its
-summary with that issue's id:
+Summary is the open text field. A node that stands for a tracked issue
+opens its summary with that issue's id:
 
 #+begin_src console
 $ claimdag upsert --summary "vissue-4asb land the adapter"
 $ claimdag list --json | grep vissue-4asb
 #+end_src
 
-That is a convention rather than a schema change, and it is the whole
-route. The tracker holds the citation. The node points at the tracker.
-Neither reads the other's store.
+The tracker holds the citation. The node carries the tracker id in its
+summary. The accession stays in the tracker, the memory pack, and the deed
+store, which keep their bytes after this graph has pruned the finished
+node. The [[file:seat.org][seat]] page names those stores.
 
-* Outside the join
+* The seat
 
 The tracker knows what the work is and who agrees. The deed store knows
 what the work produced. The pack knows what was learned. claimdag knows
-only which session node is held and by whom, and it is deliberately not
-joined to the others by the accession: a session's scheduling state should
-not outlive the session or leak into what is cited. Completing a node here
-does not close a ticket. The seat maps tracker ids onto nodes for
-convenience, and the mapping lives in the seat.
+which session node is held and by whom. The seat maps tracker ids onto
+nodes, and the mapping lives in the seat. Completing a node leaves the
+tracker ticket unchanged.

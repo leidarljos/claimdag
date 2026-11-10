@@ -1,0 +1,15 @@
+#+title: Tutorials
+#+description: One path from an empty directory to a finished node and a ready child.
+#+options: toc:nil num:nil
+
+* Tutorials
+
+The tutorial is one path. It uses a scratch directory, two nodes, and one
+actor. By the end a second claim has been refused, a lease has been
+renewed, and finishing the parent has made the child ready.
+
+Put =claimdag= on =PATH= from the [[file:install.org][installation]] page,
+then follow [[file:getting-started.org][Getting started]] from the first
+command. The page is the whole lesson. The [[file:howto.org][how-to guides]]
+are the tasks that come after it, and the [[file:concepts.org][concepts]] page
+names the edges the lesson creates.

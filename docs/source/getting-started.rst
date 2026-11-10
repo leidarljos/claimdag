@@ -1,4 +1,5 @@
-Everything below runs in a scratch directory. By the end you will have two
+Install ``claimdag`` from the :doc:`installation <install>` page if it is
+not already on ``PATH``. Everything below runs in a scratch directory. By the end you will have two
 nodes, one waiting on the other, and a claim a second worker cannot steal.
 You will see a stalled claim handed back by its lease, and a finished node
 unblock the next.
@@ -17,7 +18,7 @@ unblock the next.
    092dca29...  ready  task  gen=1  parse the manifest header
 
 Ids are 32 hex characters, minted from the node's own fields. ``link`` adds a
-hard dependency: the child is not ready until the parent is terminal.
+hard dependency: the child becomes ready when the parent is done.
 Readiness is derived, never set by hand. ``list`` prints newest first, and
 breaks a tie on the id, so those two lines can swap.
 
@@ -60,13 +61,16 @@ now somebody else's.
    $ claimdag list
    71368334...  ready  task  gen=1  reject a manifest with no header
 
-The child became ready the moment its parent was terminal. Nothing here
+The child became ready the moment its parent was done. Nothing here
 touched a tracker: the ticket this work belongs to is still open until
 somebody closes it there.
 
 Where next
 ==========
 
--  :doc:`How-to <howto>`: pick the next node by critical path, archive finished work, drive the pane.
--  :doc:`Reference <reference>`: verbs, statuses, the snapshot file.
--  :doc:`Explanation <explanation>`: why a claim is a lease and a generation is a fence.
+The :doc:`how-to guides <howto>` cover the directory, ``claim-next``, the
+lease, archive, the pane, and the server. The :doc:`concepts <concepts>`
+page draws the two edges this lesson created. The
+:doc:`explanation <explanation>` is why the generation fences a stale
+holder. The :doc:`reference <reference>` is the command line, and the
+:doc:`API reference <api>` is the library.

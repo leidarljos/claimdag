@@ -17,7 +17,7 @@
 <title>ready</title>
 <path fill="#f1db4b" stroke="#004d40" stroke-width="1.4" d="M488.25,-72.5C488.25,-72.5 293,-72.5 293,-72.5 287,-72.5 281,-66.5 281,-60.5 281,-60.5 281,-42 281,-42 281,-36 287,-30 293,-30 293,-30 488.25,-30 488.25,-30 494.25,-30 500.25,-36 500.25,-42 500.25,-42 500.25,-60.5 500.25,-60.5 500.25,-66.5 494.25,-72.5 488.25,-72.5"/>
 <text xml:space="preserve" text-anchor="middle" x="390.62" y="-57.1" font-family="Jost" font-size="12.00" fill="#004d40">ready</text>
-<text xml:space="preserve" text-anchor="middle" x="390.62" y="-39.85" font-family="Jost" font-size="12.00" fill="#004d40">derived: every dependency terminal</text>
+<text xml:space="preserve" text-anchor="middle" x="390.62" y="-39.85" font-family="Jost" font-size="12.00" fill="#004d40">derived: every dependency done</text>
 </g>
 <!-- todo&#45;&gt;ready -->
 <g id="edge1" class="edge">

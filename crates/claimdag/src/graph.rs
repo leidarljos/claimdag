@@ -22,9 +22,9 @@ use crate::id::{mint_work_id, WorkId};
 /// section at `== doctor`, 242.9 ms median (242.2 to 243.1), and the whole
 /// sitting at 541 ms. One sitting on a graph of 4096 nodes took 162 ms to
 /// list that graph and reclaim, still under the doctor. Fifteen minutes is many
-/// of those sittings, so one that is still printing is not quiet, and a
-/// crashed holder does not keep the node, or the one claim its assignee is
-/// allowed, for the rest of the day. The measured step is under this, so the
+/// of those sittings, so one that is still printing stays inside the lease.
+/// A crashed holder gives the node back the same day, and gives back the one
+/// claim its assignee is allowed. The measured step is under this, so the
 /// value stays 900.
 pub const DEFAULT_LEASE_SECS: u64 = 900;
 
@@ -384,7 +384,7 @@ pub struct WorkNode {
     pub finished_unix: u64,
     /// Sole open-content field (writer-owned length).
     pub summary: String,
-    /// Soft hide. Only legal on a terminal node. Not a status.
+    /// Soft hide. Only legal on a terminal node.
     pub archived: bool,
 }
 
@@ -392,7 +392,7 @@ pub struct WorkNode {
 ///
 /// The ledger lives in memory only. `work.bin` does not store it, so a
 /// command-line call starts with an empty ledger and its entries are gone
-/// when it exits. It is not a history of the graph.
+/// when it exits. It is the list of operations this process has applied.
 #[derive(Debug, Clone)]
 pub struct WorkLedgerEntry {
     pub seq: u64,
@@ -1265,8 +1265,8 @@ impl WorkGraph {
     /// Hand one claim back on purpose. The node returns to `ready`, the
     /// assignee clears, and the generation moves, exactly as a reclaim does:
     /// the holder chose to stop before the lease ran out. A zero actor still
-    /// hands it back and records `no-actor`. An actor who is not the holder
-    /// still hands it back and records `not-assignee`.
+    /// hands it back and records `no-actor`. A different actor still hands it
+    /// back and records `not-assignee`.
     /// [`WorkGraph::release_forced`] is the explicit way to hand back a claim
     /// for nobody without that warning.
     ///
@@ -1355,8 +1355,8 @@ impl WorkGraph {
         Ok(generation)
     }
 
-    /// Move the lease forward. The generation stays: a renewal is not a change
-    /// of ownership.
+    /// Move the lease forward. The generation stays: a renewal keeps the same
+    /// owner.
     pub fn renew(&mut self, id: WorkId, actor: WorkId) -> Result<u64, String> {
         let mismatch = {
             let node = self.nodes.get(&id).ok_or_else(|| unknown_id("renew", id))?;
@@ -1411,8 +1411,8 @@ impl WorkGraph {
     /// Finish a node. `expected_gen` is the fencing token from the claim: the
     /// generation moves on every claim and reclaim, so a stale holder is
     /// refused. `None` skips the check. A zero actor still finishes the node
-    /// and records `no-actor`. An actor who is not the holder still finishes
-    /// it and records `not-assignee`. [`WorkGraph::complete_forced`] is the
+    /// and records `no-actor`. A different actor still finishes it and records
+    /// `not-assignee`. [`WorkGraph::complete_forced`] is the
     /// explicit way to finish a node for nobody without that warning.
     ///
     /// A node prune dropped after it finished is as finished as it gets, so

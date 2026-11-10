@@ -1,4 +1,7 @@
-One writer. Unpacked Cap'n on disk. Hosts mmap ``work.bin``.
+One writer. Unpacked Cap'n on disk. Hosts mmap ``work.bin``. The
+:doc:`concepts <concepts>` page is the model this layout stores. The
+:doc:`explanation <explanation>` is why the snapshot belongs to one
+session.
 
 Law
 ===
@@ -7,47 +10,52 @@ Law
 -  The schema is claimdag's. This crate has no RPC surface.
 -  Ids are 128-bit ``WorkId``. Kind, status, and role are closed enums.
 -  Summary is the only open text field.
--  Terminal status is sticky. ``archive`` is a flag, not a status.
+-  Terminal status is sticky. ``archive`` is a flag on a terminal node. The status field stays the terminal status it already had.
 
-Not a record
-============
+Session snapshot
+================
 
-claimdag holds the work one host process is handing out now. The snapshot lives
-in the runtime directory, is capped at 4096 nodes, and prunes finished work to
-stay under the cap. Nothing here outlives the session that wrote it.
+claimdag holds the work one host process is handing out now. The snapshot
+lives in the runtime directory, is capped at 4096 nodes, and prunes
+finished work to stay under the cap. The bytes belong to the session that
+wrote them. ``measurements/node-cap.org`` is the timing that picked 4096: a
+writing call on that size stays inside a 10 ms budget on the measured
+8-core Xeon.
 
-A plain-text issue tracker models the same shape: parent, hard dependency,
-holder, derived workable set, sticky terminal state. The two are not redundant,
-because the tempos differ. A record is edited by people and kept in version
-control. A scheduler is compare-and-swap over an mmap. The rule for picking is
-the tempo: if the answer has to survive the session, it belongs in the tracker.
+A plain-text issue tracker has a parent, a hard dependency, a holder, a
+derived workable set, and a sticky terminal state. A record is edited by
+people and kept in version control. A scheduler is compare-and-swap over
+a mapped file. The tempo picks the store. An answer that has to survive
+the session belongs in the tracker.
 
-A ``WorkNode`` therefore has no field for a deed accession and is not getting one.
-An accession crosses durable stores. A graph that prunes its own finished nodes
-cannot be an end of a citation without lying about it later. A node names what
-it schedules instead, by opening ``summary`` with the tracker id. That is a
-convention and not a schema change.
+Summary is the field a node uses to name what it schedules. A node opens
+its summary with the tracker id. The
+:doc:`explanation <explanation>` shows the command. The schema stays
+as it is.
 
 Split
 =====
 
-========================= ===============================
+========================= =========================================================================================================
 Piece                     Role
-========================= ===============================
-``schema/claimdag.capnp`` Snap / node / id
-``crates/claimdag``       DAG, CAS, mmap load
-``crates/claimdag-cli``   ``claimdag`` over a directory
-``claimdag_tui``          Textual tree; mutations via CLI
-========================= ===============================
+========================= =========================================================================================================
+``schema/claimdag.capnp`` Snap, node, and id
+``crates/claimdag``       DAG, compare-and-swap, mmap load. Public items are the :doc:`API reference <api>`
+``crates/claimdag-cli``   ``claimdag`` over a directory. Verbs are the :doc:`reference <reference>`
+``claimdag-tui``          ratatui forest over the parents. Mutations go through the same ``WorkGraph`` calls the command line makes
+========================= =========================================================================================================
 
 Disk
 ====
 
 -  Write: atomic replace of ``$dir/work.bin`` (unpacked Cap'n).
 -  Read: mmap ``work.bin``.
--  Default ``list`` / TUI: live nodes only (not terminal, not archived).
+-  Default ``list`` and the pane show live nodes: a terminal node and an archived node stay out until the flag asks for them.
 
-Not this crate
-==============
+The directory layout is the :doc:`directory how-to <howto-dir>`.
 
-This crate is the team DAG only. Memory and ledger stores stay out.
+Neighbouring stores
+===================
+
+Memory and the ledger live in their own crates. This crate is the session
+graph. The :doc:`seat <seat>` page names them.

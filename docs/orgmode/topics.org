@@ -1,0 +1,16 @@
+#+title: Topics
+#+description: The work-graph model, the lease, and the on-disk snapshot.
+#+options: toc:nil num:nil
+
+* Topics
+
+Topics are the background for someone who has run the
+[[file:getting-started.org][tutorial]].
+
+- [[file:concepts.org][Concepts]] draws a node, the parent edge, the dependency edge, and the generation.
+- [[file:explanation.org][Explanation]] is why a claim expires and why =complete --gen= refuses a stale holder.
+- [[file:architecture.org][Architecture]] is the snapshot file, the 4096-node cap, and which crate holds what.
+- [[file:seat.org][In the seat]] is the other crates a session reads, and the sites that document them.
+
+The [[file:reference.org][reference]] and the [[file:api.org][API reference]]
+are the inventories. The [[file:howto.org][how-to guides]] are the tasks.

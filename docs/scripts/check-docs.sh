@@ -16,11 +16,13 @@ fi
 
 # Debug and release print the same help. Debug is the build the test
 # workflow already pays for; this job does not need a release profile.
-cargo build -p claimdag-cli
+# The pane examples run claimdag-tui --dump, so that binary is on PATH too.
+cargo build -p claimdag-cli -p claimdag-tui
 
 bindir=$(mktemp -d)
 trap 'rm -rf "$bindir"' EXIT
 ln -s "$root/target/debug/claimdag" "$bindir/claimdag"
+ln -s "$root/target/debug/claimdag-tui" "$bindir/claimdag-tui"
 # Prefer this binary over any claimdag already on PATH.
 export PATH="$bindir:$PATH"
 export CLAIMDAG_BIN="$bindir/claimdag"
@@ -29,6 +31,8 @@ export NO_COLOR=1
 export LC_ALL=C
 
 fail=0
+python3 "$root/docs/scripts/gen-api.py" --check || fail=1
+python3 "$root/docs/scripts/sync-changelog.py" --check || fail=1
 python3 -m cogapp --check --diff \
   --check-fail-msg "reference.org drifted from claimdag --help; run docs/scripts/check-docs.sh" \
   docs/orgmode/reference.org || fail=1

@@ -20,19 +20,35 @@ from pathlib import Path
 
 # The pages a site has are the org files it has, index aside, in a fixed order.
 _ORG = Path(__file__).resolve().parents[1] / "orgmode"
-_ORDER = ["getting-started", "howto", "reference", "explanation", "architecture"]
-PAGES = [p for p in _ORDER if (_ORG / f"{p}.org").is_file()] + sorted(
-    q.stem for q in _ORG.glob("*.org") if q.stem not in _ORDER and q.stem != "index"
-)
+_GROUPS = [
+    ("Install", ["install"]),
+    ("Tutorials", ["tutorials", "getting-started"]),
+    ("How-to guides", ["howto", "howto-dir", "howto-take", "howto-lease", "howto-archive", "howto-pane", "howto-mcp"]),
+    ("Topics", ["topics", "concepts", "explanation", "architecture", "seat"]),
+    ("Reference", ["reference", "api", "changelog"]),
+]
+_ORDERED = [page for _caption, pages in _GROUPS for page in pages]
+_PRESENT = {path.stem for path in _ORG.glob("*.org")}
+_EXTRA = sorted(stem for stem in _PRESENT if stem not in _ORDERED and stem != "index")
+if _EXTRA:
+    _GROUPS = [*_GROUPS, ("Guides", _EXTRA)]
+PAGES = [page for _caption, pages in _GROUPS for page in pages if page in _PRESENT]
 
-TOCTREE = """
 
-.. toctree::
-   :maxdepth: 1
-   :caption: Guides
-   :hidden:
+def _toctree() -> str:
+    blocks = []
+    for caption, pages in _GROUPS:
+        present = [page for page in pages if page in _PRESENT]
+        if not present:
+            continue
+        body = "\n".join(f"   {page}" for page in present)
+        blocks.append(
+            f"\n.. toctree::\n   :maxdepth: 1\n   :caption: {caption}\n   :hidden:\n\n{body}\n"
+        )
+    return "".join(blocks)
 
-""" + "".join(f"   {page}\n" for page in PAGES)
+
+TOCTREE = _toctree()
 
 _FOOTNOTE_DEF = re.compile(r"^\[\d+\]")
 
