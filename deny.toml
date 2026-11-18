@@ -1,3 +1,9 @@
+# Advisories with no fix to take.
+[advisories]
+ignore = [
+    { id = "RUSTSEC-2026-0543", reason = "chrono, through rmcp 3.9.0 and its schemars 1.2.2 feature; every version is affected and no fixed release exists; review on 2027-02-18" },
+]
+
 # Licenses this workspace may depend on. CI runs `cargo deny check`, so an
 # advisory against a crate in the tree fails it too.
 
