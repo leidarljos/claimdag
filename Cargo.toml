@@ -10,7 +10,7 @@ members = [
 [workspace.package]
 # The only version written by hand. The copies cogfiles.txt lists are cog
 # blocks; `cog -r @cogfiles.txt` rewrites them from this line.
-version = "0.8.0"
+version = "0.9.0"
 edition = "2021"
 # `cargo +1.85 check -p claimdag --all-targets` passes on rustc 1.85.1
 # (4eb161250, 2025-03-15). claimdag-mcp and claimdag-tui set their own.
@@ -30,5 +30,5 @@ capnp = "0.27"
 memmap2 = "0.9"
 # Published path dependency. cog writes the version from [workspace.package].
 # [[[cog import claimdag_version as v; cog.out(v.dependency_line()) ]]]
-claimdag = { path = "crates/claimdag", version = "0.8.0" }
+claimdag = { path = "crates/claimdag", version = "0.9.0" }
 # [[[end]]]

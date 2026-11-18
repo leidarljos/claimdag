@@ -15,8 +15,8 @@ copyright = "claimdag developers"
 author = "claimdag developers"
 # cog writes these from [workspace.package] version in the workspace Cargo.toml.
 # [[[cog import claimdag_version as v; cog.out(v.sphinx_lines()) ]]]
-release = "0.8.0"
-version = "0.8"
+release = "0.9.0"
+version = "0.9"
 # [[[end]]]
 
 extensions = [

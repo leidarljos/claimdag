@@ -6,6 +6,82 @@ The :doc:`reference <reference>` is the current command line. The
 
 Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 
+0.9.0 (2026-11-18)
+==================
+
+### Features
+
+-  A Model Context Protocol (MCP) client can add a node, link or unlink a dependency, and read one node.
+   ``claimdag_upsert`` keeps the node's status when status is omitted.
+   ``claimdag_get`` returns that row or the status prune kept.
+-  Every seat of a user finds the same default graph.
+   ``claimdag where`` lists the candidate directories, and ``claimdag where --move`` migrates the graph.
+
+### Fixes
+
+-  A claimdag writer waits at most 1 s for the graph lock.
+   It then names the process that has the lock and how to free it.
+-  A graph refusal from the Model Context Protocol (MCP) server is a tool result with the refusal text.
+   A seat can read it.
+   An id that is not 32 hex characters is still invalid params.
+-  A malformed id is reported as a bad id, and the message gives its length.
+   A hex prefix of exactly one node names that id and is not used as the id.
+-  A refused claim now names the holder, the unfinished dependencies, or the generation, and the command that clears it.
+   A refused upsert, link, unlink or archive names the node and how to resolve it.
+-  A refused claimdag command now names the node, its claimant and the command that resolves it.
+-  A release or complete that names nobody still runs, and so does a release, complete, renew or set\ :sub:`running` whose actor is not the holder.
+   Each writes ``allow``, ``warn`` and the rule, separated by tabs, on stderr and in ``warn.log``.
+   A default directory another user owns is opened the same way, with the rule ``not-owner``.
+   ``--force`` still appends to ``forced.log``.
+-  A server tool that records a warning puts that line in the tool result, as a text block after the row.
+   Stderr and ``warn.log`` still get the same line.
+-  A write that resolved the old directory before ``claimdag where --move`` follows the moved graph.
+-  CI runs fmt, clippy and the suite on Linux x86-64, Linux arm64 and macOS.
+   A seat on macOS now takes the machine name, not localhost.
+-  Completing a node that prune dropped now returns that node with the status it finished with.
+   The answer comes over the Model Context Protocol (MCP).
+-  Completing or releasing a node that prune dropped after it finished now exits 0 and changes nothing.
+-  Omitting ``--status`` on ``upsert`` keeps the status an existing node already has.
+   A holder can rewrite its summary and keep the claim.
+   A new node still starts at ``todo``.
+   An explicit status on held work is still refused.
+-  When the directory was not named, a running Model Context Protocol (MCP) server resolves it on each call.
+   ``claimdag where --move`` is then the graph the next call reads, and a claim writes there.
+   A directory named with ``CLAIMDAG_DIR`` stays the one the server was given.
+-  ``claim-next`` takes the same node for the same graph and the same worker in every process.
+   It picked from the graph's hash order, which changes from one process to the next, so one worker on one graph got a different node on each call.
+-  ``claimdag ready`` prints ``waiting_below`` on each JSON row and ``below=N`` on each text row.
+   ``list`` output is unchanged.
+-  ``claimdag-mcp`` and ``claimdag-tui`` now declare Rust 1.88, the floor their dependencies build on.
+   Installing either on an older compiler reports that requirement from the crate itself.
+   CI checks each crate on the ``rust-version`` it declares.
+-  ``claimdag_ready_balanced`` and ``claimdag_claim_next`` refuse a role the graph does not store.
+   The tool schema lists the seven roles.
+   A short assignee is refused as a bad id.
+
+### Documentation
+
+-  Each sentence added for a warning label is on its own line.
+-  The command section of the reference is the help text of claimdag itself.
+   The README and getting-started commands run in CI.
+-  The how-to gives each sentence about the server's tools its own line.
+
+### Miscellaneous
+
+-  A ``work.bin`` that 0.8.0 wrote opens, and saving it again writes the same bytes.
+-  An integration test now calls every claimdag-mcp tool over JSON-RPC.
+-  Changelog entries are fragments in ``changelog.d``, and ``towncrier build`` collects them into ``CHANGELOG.md``.
+-  Comments now give the reasons for the default lease, the idle poll of the pane, and the ready bench window.
+-  Release archives and crates.io publishes are built with Rust 1.97.1, the toolchain the check jobs use.
+   ``cargo deny check`` no longer warns about a license allowance that matches no crate.
+-  The version is written by hand only in the workspace ``Cargo.toml``.
+   cog writes the other copies, and CI fails when they drift.
+-  Tokio is 1.53.3, which closes RUSTSEC-2026-0386.
+-  claimdag-mcp builds on rmcp 3.9.0, which covers RUSTSEC-2026-0457, RUSTSEC-2026-0461 and RUSTSEC-2026-0462, so ``cargo deny check`` passes.
+   The server returns ``ServerConfig``, the name rmcp 3.9.0 uses in place of the deprecated ``ServerInfo`` alias.
+
+.. _section-1:
+
 0.8.0 (2026-10-20)
 ==================
 
@@ -47,7 +123,7 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
    0700 and refuses one another user owns, by name. A directory named by
    ``CLAIMDAG_DIR`` or ``--dir`` is used as given, whoever owns it.
 
-.. _section-1:
+.. _section-2:
 
 0.7.1 (2026-10-10)
 ==================
@@ -57,7 +133,7 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 -  The how-to says how several workers take work at once, and its list of
    tools names ``claimdag_ready_balanced`` and ``claimdag_claim_next``.
 
-.. _section-2:
+.. _section-3:
 
 0.7.0 (2026-10-09)
 ==================
@@ -68,7 +144,7 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
    passes it back. Omitting ``--gen`` skips the check, so a reclaimed node
    can still be finished.
 
-.. _section-3:
+.. _section-4:
 
 0.6.2 (2026-09-20)
 ==================
@@ -76,7 +152,7 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 -  The how-to names the tools the server serves; ``claimdag_complete`` is
    titled as what it does; the architecture page names the ratatui pane.
 
-.. _section-4:
+.. _section-5:
 
 0.6.0 (2026-09-12)
 ==================
@@ -85,7 +161,7 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
    back to ready with the generation moved, so a tracker id that maps to
    one node can be sat on again. The ledger keeps the earlier completion.
 
-.. _section-5:
+.. _section-6:
 
 0.5.0 (2026-09-12)
 ==================
@@ -95,7 +171,7 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
    generation moved. A holder that stops without it stays busy until the
    lease runs out.
 
-.. _section-6:
+.. _section-7:
 
 0.4.0 (2026-09-12)
 ==================
@@ -113,7 +189,7 @@ What a user gets:
    with one key.
 -  A documentation site at https://leidarljos.github.io/claimdag/.
 
-.. _section-7:
+.. _section-8:
 
 0.3.0
 =====
