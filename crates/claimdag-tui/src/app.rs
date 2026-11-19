@@ -40,6 +40,8 @@ pub struct App {
     pub message: String,
     /// What the files looked like at the last reload.
     stamp: u64,
+    /// Whether the last reload found a corrupt snapshot.
+    unreadable: bool,
     /// How long a claim may go quiet before the pane hands it back; the graph
     /// takes the lease per call.
     pub lease: u64,
@@ -63,6 +65,7 @@ impl App {
             show_archived: false,
             message: String::new(),
             stamp: 0,
+            unreadable: false,
             lease: DEFAULT_LEASE,
         };
         app.reload();
@@ -88,9 +91,28 @@ impl App {
     pub fn reload(&mut self) {
         let held = self.selected_id();
         self.handles = Handles::load(&self.dir);
-        let graph = WorkGraph::load_dir(&self.dir);
-        let nodes = graph.list_view(self.show_terminal, self.show_archived);
-        self.rows = forest::rows(&nodes, &self.handles);
+        match WorkGraph::open_dir(&self.dir) {
+            Ok(graph) => {
+                let nodes = graph.list_view(self.show_terminal, self.show_archived);
+                self.rows = forest::rows(&nodes, &self.handles);
+                if self.unreadable {
+                    self.message.clear();
+                    self.unreadable = false;
+                }
+            }
+            Err(claimdag::Absent::NoDirectory(_) | claimdag::Absent::NoSnapshot(_)) => {
+                self.rows.clear();
+                if self.unreadable {
+                    self.message.clear();
+                    self.unreadable = false;
+                }
+            }
+            Err(err @ claimdag::Absent::Unreadable(_, _)) => {
+                self.rows.clear();
+                self.unreadable = true;
+                self.message = err.to_string();
+            }
+        }
         self.stamp = self.snapshot_stamp();
         self.selected = held
             .and_then(|id| self.rows.iter().position(|row| row.id == id))
@@ -443,6 +465,26 @@ mod tests {
         let mut app = App::open(dir.path().to_path_buf(), actor());
         app.handle_key(key(KeyCode::Char('u')));
         assert_eq!(app.message, "no edge");
+    }
+
+    #[test]
+    fn opening_an_unreadable_snapshot_surfaces_the_read_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let snapshot = dir.path().join(claimdag::SNAP_BIN);
+        std::fs::write(&snapshot, b"corrupt bytes").unwrap();
+
+        let mut app = App::open(dir.path().to_path_buf(), actor());
+        assert!(app.rows.is_empty());
+        assert!(
+            app.message.contains("could not be read"),
+            "expected unreadable snapshot error, got: {}",
+            app.message
+        );
+
+        seeded(dir.path());
+        app.poll();
+        assert_eq!(app.rows.len(), 1);
+        assert_eq!(app.message, "");
     }
 }
 

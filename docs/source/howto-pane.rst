@@ -39,7 +39,8 @@ Key                      Action
 
 The footer in the pane draws the same bindings. Colours come from the
 terminal. The lease the pane offers is 900 seconds, the same default as
-``reclaim``.
+``reclaim``. When ``work.bin`` cannot be parsed, the status line shows the
+read error rather than treating the graph as empty.
 
 ``CLAIMDAG_ACTOR`` pins who the pane claims as. With it unset, the id is
 derived from user and host, so the same seat is the same actor across
