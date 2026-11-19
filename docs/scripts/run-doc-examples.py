@@ -53,6 +53,13 @@ _WILDCARD = re.compile(rf"{_ID_TOKEN.pattern}|{_UNIX_TOKEN.pattern}")
 _PLACEHOLDER = re.compile(r"<[a-z]+>")
 
 
+def check_readme_plain_text_symbols() -> None:
+    """README examples stay plain text, not raw LaTeX."""
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    if r"($\Delta$)" in readme:
+        raise SystemExit("run-doc-examples: README.md uses raw LaTeX for delta")
+
+
 def line_regex(expected: str) -> re.Pattern[str]:
     pieces: list[str] = []
     last = 0
@@ -297,6 +304,7 @@ def run_page(page: pathlib.Path, env: dict[str, str]) -> list[str]:
 
 def main() -> int:
     check_abbreviation_rule()
+    check_readme_plain_text_symbols()
     claimdag = shutil.which("claimdag")
     if claimdag is None:
         print("run-doc-examples: claimdag is not on PATH", flush=True)

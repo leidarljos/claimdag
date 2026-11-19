@@ -84,7 +84,7 @@ cost, then recency, then id: the list-scheduling priority (Hu, DOI
 Every row carries `waiting_below`, so the order is on the row.
 
 For multi-worker concurrency, `ready --balanced` and `claim-next` apply the Power
-of Two Choices (P2C) bounded by critical slack ($\Delta$). Probes are seeded with
+of Two Choices (P2C) bounded by critical slack (delta). Probes are seeded with
 the requesting worker ID to prevent herding on the top node while strictly prioritizing
 role affinity and preserving critical path progress.
 
