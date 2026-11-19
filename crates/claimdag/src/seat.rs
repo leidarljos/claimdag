@@ -312,7 +312,11 @@ fn locate_from(explicit: Option<PathBuf>, named: Option<OsString>, env: Fallback
         Place { dir, source, graph }
     };
     let mut places: Vec<Place> = Vec::new();
-    places.extend(explicit.map(|dir| place(dir, Source::Flag)));
+    places.extend(
+        explicit
+            .filter(|dir| !dir.as_os_str().is_empty())
+            .map(|dir| place(dir, Source::Flag)),
+    );
     places.extend(
         named
             .filter(|raw| !raw.is_empty())
@@ -380,6 +384,14 @@ mod tests {
     fn an_empty_name_is_not_a_name() {
         assert_eq!(
             dir_from(None, Some(OsString::new()), env(Some("/run"), None, None)),
+            PathBuf::from("/run/claimdag")
+        );
+    }
+
+    #[test]
+    fn an_empty_flag_value_is_not_a_directory_name() {
+        assert_eq!(
+            dir_from(Some(PathBuf::new()), None, env(Some("/run"), None, None)),
             PathBuf::from("/run/claimdag")
         );
     }
