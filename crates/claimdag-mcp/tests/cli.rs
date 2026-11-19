@@ -63,6 +63,24 @@ fn unknown_or_incomplete_flags_exit_two() {
 }
 
 #[test]
+fn eof_before_initialize_prints_a_clear_line() {
+    let out = Command::new(env!("CARGO_BIN_EXE_claimdag-mcp"))
+        .stdin(Stdio::null())
+        .output()
+        .expect("run claimdag-mcp with closed stdin");
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        out.stdout.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&out.stderr),
+        "claimdag-mcp: stdin closed before initialize\n"
+    );
+}
+
+#[test]
 fn dir_flag_overrides_environment_and_serves_that_graph() {
     let dir_flag = tempfile::tempdir().expect("flag dir");
     let dir_env = tempfile::tempdir().expect("env dir");

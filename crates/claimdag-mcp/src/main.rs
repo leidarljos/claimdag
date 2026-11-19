@@ -58,6 +58,10 @@ where
     Ok(CliAction::Serve(dir))
 }
 
+fn closed_before_initialize(err: &impl std::fmt::Display) -> bool {
+    err.to_string().contains("connection closed: initialize request")
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let dir = match parse_args(std::env::args_os()) {
@@ -77,7 +81,22 @@ async fn main() -> anyhow::Result<()> {
             std::process::exit(2);
         }
     };
-    let running = server::ClaimdagServer::from_dir(dir).serve(stdio()).await?;
-    running.waiting().await?;
+    let running = match server::ClaimdagServer::from_dir(dir).serve(stdio()).await {
+        Ok(running) => running,
+        Err(err) => {
+            if closed_before_initialize(&err) {
+                eprintln!("claimdag-mcp: stdin closed before initialize");
+                std::process::exit(1);
+            }
+            return Err(err.into());
+        }
+    };
+    if let Err(err) = running.waiting().await {
+        if closed_before_initialize(&err) {
+            eprintln!("claimdag-mcp: stdin closed before initialize");
+            std::process::exit(1);
+        }
+        return Err(err.into());
+    }
     Ok(())
 }
