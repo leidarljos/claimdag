@@ -43,6 +43,10 @@ fn status_of(line: &str) -> &str {
     line.split_whitespace().nth(1).expect("status")
 }
 
+fn kind_of(line: &str) -> &str {
+    line.split_whitespace().nth(2).expect("kind")
+}
+
 fn field<'a>(line: &'a str, key: &str) -> &'a str {
     let prefix = format!("{key}=");
     line.split_whitespace()
@@ -115,4 +119,20 @@ fn an_explicit_status_on_held_work_is_still_refused() {
     assert!(stdout(&out).is_empty(), "stdout {}", stdout(&out));
     let after = get_line(dir.path(), &id);
     assert_eq!(after, before, "a refused upsert changed the node");
+}
+
+#[test]
+fn omitting_kind_on_upsert_keeps_the_existing_nodes_kind() {
+    let dir = tempfile::tempdir().unwrap();
+    let id = upsert(dir.path(), &["--kind", "goal", "--summary", "initial goal"]);
+    assert_eq!(kind_of(&get_line(dir.path(), &id)), "goal");
+
+    let updated = upsert(dir.path(), &["--id", &id, "--summary", "revised goal"]);
+    assert_eq!(updated, id);
+    let line = get_line(dir.path(), &id);
+    assert_eq!(kind_of(&line), "goal", "{line}");
+    assert_eq!(summary_of(&line), "revised goal", "{line}");
+
+    let minted = upsert(dir.path(), &["--summary", "default kind"]);
+    assert_eq!(kind_of(&get_line(dir.path(), &minted)), "task");
 }

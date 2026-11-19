@@ -21,8 +21,9 @@ a clock salt, so two runs with the same summary mint different ids.
 
 Summary is the open text field. Kind, status, and role are closed enums.
 
-Kinds are =unset=, =goal=, =step=, =task=, and =molecule=. The command
-line default is =task=.
+Kinds are =unset=, =goal=, =step=, =task=, and =molecule=. A new node
+defaults to =task=, and omitting =--kind= on an existing node keeps the
+stored kind.
 
 Roles are =unset=, =explore=, =architect=, =implementor=, =verifier=,
 =orchestrator=, and =general=. The command line default is =unset=.

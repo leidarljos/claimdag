@@ -73,7 +73,7 @@ The verbs and flags below are what ``claimdag --help`` and each verb's
 
    Options:
          --id <ID>
-         --kind <KIND>        [default: task]
+         --kind <KIND>        Omit to keep the kind an existing node already has. A new node defaults to task
          --status <STATUS>    Omit to keep the status an existing node already has. A new node starts at todo
          --role <ROLE>        [default: unset]
          --parent <PARENT>    Parent work id (32 hex). Zero means unset [default: 00000000000000000000000000000000]

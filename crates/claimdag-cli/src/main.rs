@@ -44,8 +44,9 @@ enum Cmd {
     Upsert {
         #[arg(long)]
         id: Option<String>,
-        #[arg(long, default_value = "task")]
-        kind: String,
+        /// Omit to keep the kind an existing node already has. A new node defaults to task.
+        #[arg(long)]
+        kind: Option<String>,
         /// Omit to keep the status an existing node already has. A new node starts at todo.
         #[arg(long)]
         status: Option<String>,
@@ -551,20 +552,23 @@ fn run() -> Result<(), String> {
                 Some(s) => parse_id(&s, &g)?,
                 None => WorkId::ZERO,
             };
-            let kind = WorkKind::parse_str(&kind).ok_or_else(|| format!("bad kind {kind}"))?;
+            let present = (!wid.is_zero()).then(|| g.get(wid)).flatten();
+            // An omitted --kind on an existing node keeps that node's kind.
+            // A new node defaults to task, matching the MCP server.
+            let kind = match kind {
+                Some(raw) => WorkKind::parse_str(&raw).ok_or_else(|| format!("bad kind {raw}"))?,
+                None if present.is_some() => WorkKind::Unset,
+                None => WorkKind::Task,
+            };
             // An omitted --status on a node already in the graph repeats that
             // node's status, so the write changes metadata only. A new node,
-            // including an id the graph does not hold yet, still starts at
+            // including an id the graph does not store yet, still starts at
             // todo. Readiness is derived from the dependencies after that.
             let status = match status {
                 Some(raw) => {
                     WorkStatus::parse_str(&raw).ok_or_else(|| format!("bad status {raw}"))?
                 }
-                None if !wid.is_zero() => g
-                    .get(wid)
-                    .map(|node| node.status)
-                    .unwrap_or(WorkStatus::Todo),
-                None => WorkStatus::Todo,
+                None => present.map(|node| node.status).unwrap_or(WorkStatus::Todo),
             };
             let role = WorkRole::parse_str(&role).ok_or_else(|| format!("bad role {role}"))?;
             let parent = parse_id(&parent, &g)?;
