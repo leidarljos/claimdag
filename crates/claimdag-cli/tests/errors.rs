@@ -378,3 +378,21 @@ fn repeated_complete_prints_the_stored_terminal_status() {
     assert!(log.contains("done"), "{log}");
     assert!(!log.contains("cancelled"), "{log}");
 }
+
+#[test]
+fn absent_graph_error_names_upsert_and_upsert_creates_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let missing = dir.path().join("fresh-seat");
+    let before = claimdag(&missing, &["list"]);
+    assert_eq!(before.status.code(), Some(1));
+    let msg = stderr(&before);
+    assert!(msg.contains("claimdag upsert"), "{msg}");
+    assert!(!msg.contains("claim something"), "{msg}");
+
+    let created = claimdag(&missing, &["upsert", "--summary", "first node"]);
+    assert_eq!(created.status.code(), Some(0), "{}", stderr(&created));
+
+    let after = claimdag(&missing, &["list"]);
+    assert_eq!(after.status.code(), Some(0), "{}", stderr(&after));
+    assert!(stdout(&after).contains("first node"), "{}", stdout(&after));
+}

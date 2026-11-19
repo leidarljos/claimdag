@@ -454,13 +454,13 @@ impl std::fmt::Display for Absent {
             Self::NoDirectory(dir) => write!(
                 f,
                 "no work graph at {}: the directory does not exist, so nothing has been claimed on this seat. \
-                 Set CLAIMDAG_DIR, pass --dir, or claim something to create it",
+                 Set CLAIMDAG_DIR, pass --dir, or run claimdag upsert --summary \"...\" to create it",
                 dir.display()
             ),
             Self::NoSnapshot(dir) => write!(
                 f,
                 "no work graph at {}: the directory holds no {}. \
-                 Claim something to create it",
+                 Run claimdag upsert --summary \"...\" to create it",
                 dir.display(),
                 crate::snap::SNAP_BIN
             ),
@@ -2234,6 +2234,13 @@ mod tests {
                 .contains("nothing has been claimed"),
             "the message has to say what to do about it"
         );
+        assert!(
+            WorkGraph::open_dir(&missing)
+                .unwrap_err()
+                .to_string()
+                .contains("claimdag upsert"),
+            "the message has to name upsert as the creator"
+        );
         // A writer still starts cold there, which is the whole reason the two
         // views exist.
         assert!(WorkGraph::load_dir(&missing).list().is_empty());
@@ -2244,6 +2251,13 @@ mod tests {
             WorkGraph::open_dir(&empty),
             Err(Absent::NoSnapshot(ref at)) if *at == empty
         ));
+        assert!(
+            WorkGraph::open_dir(&empty)
+                .unwrap_err()
+                .to_string()
+                .contains("claimdag upsert"),
+            "the message has to name upsert as the creator"
+        );
 
         let broken = base.join("corrupt");
         std::fs::create_dir_all(&broken).unwrap();

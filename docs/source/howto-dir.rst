@@ -20,10 +20,10 @@ and ``not-owner``, separated by tabs, on stderr and in ``warn.log``. A directory
 named by ``CLAIMDAG_DIR`` or ``--dir`` is used as given, with no such line, so
 a team can share one on purpose.
 
-A reader that finds no graph says so. The message names the directory and
-says it holds no ``work.bin``, or that the directory does not exist. A writer
-on a missing directory creates the snapshot. The first ``upsert`` is that
-writer:
+A reader that finds no graph says so. The message names the directory,
+says it holds no ``work.bin`` or that the directory does not exist, and
+points to ``upsert``. A writer on a missing directory creates the snapshot.
+The first ``upsert`` is that writer:
 
 .. code:: console
 
