@@ -102,10 +102,8 @@ impl App {
             }
             Err(claimdag::Absent::NoDirectory(_) | claimdag::Absent::NoSnapshot(_)) => {
                 self.rows.clear();
-                if self.unreadable {
-                    self.message.clear();
-                    self.unreadable = false;
-                }
+                self.unreadable = false;
+                self.message = "no graph yet. run claimdag upsert --summary \"...\"".into();
             }
             Err(
                 err @ (claimdag::Absent::Unreadable(_, _) | claimdag::Absent::NotDirectory(_)),
@@ -231,6 +229,15 @@ impl App {
 
     /// Hand back every claim quiet longer than the lease, not only the selected one.
     fn reclaim(&mut self) {
+        match WorkGraph::open_dir(&self.dir) {
+            Err(claimdag::Absent::NoDirectory(_) | claimdag::Absent::NoSnapshot(_)) => {
+                self.message = "no graph yet. run claimdag upsert --summary \"...\"".into();
+                self.reload();
+                return;
+            }
+            Err(claimdag::Absent::NotDirectory(_) | claimdag::Absent::Unreadable(_, _))
+            | Ok(_) => {}
+        }
         let lease = self.lease;
         self.message = match self.locked(|graph| Ok(graph.reclaim(lease).len())) {
             Err(why) => why,
@@ -487,6 +494,25 @@ mod tests {
         app.poll();
         assert_eq!(app.rows.len(), 1);
         assert_eq!(app.message, "");
+    }
+
+    #[test]
+    fn opening_a_missing_directory_hints_at_upsert() {
+        let root = tempfile::tempdir().unwrap();
+        let missing = root.path().join("missing");
+        let app = App::open(missing, actor());
+        assert!(app.rows.is_empty());
+        assert!(app.message.contains("claimdag upsert"), "{}", app.message);
+    }
+
+    #[test]
+    fn reclaim_on_a_missing_directory_does_not_create_work_bin() {
+        let root = tempfile::tempdir().unwrap();
+        let missing = root.path().join("missing");
+        let mut app = App::open(missing.clone(), actor());
+        app.handle_key(key(KeyCode::Char('R')));
+        assert!(app.message.contains("claimdag upsert"), "{}", app.message);
+        assert!(!missing.join(claimdag::SNAP_BIN).exists());
     }
 }
 
