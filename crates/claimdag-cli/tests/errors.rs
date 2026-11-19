@@ -455,3 +455,26 @@ fn bad_enum_flags_list_valid_choices() {
         stderr(&nonterminal_complete)
     );
 }
+
+#[test]
+fn a_file_path_for_dir_is_reported_as_not_a_directory() {
+    let root = tempfile::tempdir().unwrap();
+    let file = root.path().join("not-a-dir");
+    std::fs::write(&file, b"x").unwrap();
+
+    let read = claimdag(&file, &["list"]);
+    assert_eq!(read.status.code(), Some(1), "{}", stderr(&read));
+    assert!(
+        stderr(&read).contains("the path is not a directory"),
+        "{}",
+        stderr(&read)
+    );
+
+    let write = claimdag(&file, &["upsert", "--summary", "first"]);
+    assert_eq!(write.status.code(), Some(1), "{}", stderr(&write));
+    assert!(
+        stderr(&write).contains(": not a directory"),
+        "{}",
+        stderr(&write)
+    );
+}
