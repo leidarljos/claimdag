@@ -349,7 +349,9 @@ It is a text block after the row.
 A default directory another user owns is opened the same way.
 The rule for that is =not-owner=.
 
-=claim= prints the new generation. =renew= moves the lease and keeps that
+=claim= prints the new generation. Omit =--gen= on =claim= or =complete=
+to ignore generation; =--gen 0= is refused as a mismatch because initial
+generation is 1. =renew= moves the lease and keeps that
 generation. =get= prints the node and its dependencies. =complete --status
 done= is refused while a dependency is unfinished. =reopen= brings a
 terminal node back to ready and moves the generation; no record of the

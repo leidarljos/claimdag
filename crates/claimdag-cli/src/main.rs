@@ -644,13 +644,9 @@ fn run() -> Result<(), String> {
             println!("{}", out.to_hex());
         }
         Cmd::Claim { id, assignee, gen } => {
-            let expected = match gen {
-                None | Some(0) => None,
-                Some(g) => Some(g),
-            };
             let id = parse_id(&id, &g)?;
             let assignee = parse_id(&assignee, &g)?;
-            let cas = g.claim(id, assignee, expected)?;
+            let cas = g.claim(id, assignee, gen)?;
             g.save_dir(&dir)?;
             println!("gen={cas}");
         }
