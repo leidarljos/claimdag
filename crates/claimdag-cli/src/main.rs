@@ -4,13 +4,14 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use claimdag::{WorkFields, WorkGraph, WorkId, WorkKind, WorkNode, WorkRole, WorkStatus};
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(
     name = "claimdag",
     version,
     about = "CAS claim and complete on a DAG",
+    disable_help_subcommand = true,
     after_help = "Exit status is 0 when the verb ran, 1 when it was refused, and 2 when the arguments could not be read. A refusal names the node, who holds it and the unix second that holder was last written when those apply, and the command that resolves it."
 )]
 struct Cli {
@@ -249,6 +250,11 @@ enum Cmd {
         /// defaults picked a later one because only it held a graph.
         #[arg(long = "move")]
         move_graph: bool,
+    },
+    /// Print this message or the help of the given subcommand(s).
+    Help {
+        /// Optional command to describe.
+        command: Option<String>,
     },
 }
 
@@ -547,11 +553,29 @@ fn where_is(dir: Option<PathBuf>, move_graph: bool) -> Result<(), String> {
     Ok(())
 }
 
+fn print_help_for(command: Option<String>) -> Result<(), String> {
+    let mut root = Cli::command();
+    if let Some(command) = command {
+        let Some(subcommand) = root.find_subcommand_mut(&command) else {
+            return Err(format!("error: unrecognized subcommand '{command}'"));
+        };
+        subcommand
+            .print_help()
+            .map_err(|err| format!("help: {err}"))?;
+    } else {
+        root.print_help().map_err(|err| format!("help: {err}"))?;
+    }
+    println!();
+    Ok(())
+}
+
 fn run() -> Result<(), String> {
     let cli = Cli::parse();
-    if let Cmd::Where { move_graph } = cli.cmd {
-        return where_is(cli.dir, move_graph);
-    }
+    let cmd = match cli.cmd {
+        Cmd::Where { move_graph } => return where_is(cli.dir, move_graph),
+        Cmd::Help { command } => return print_help_for(command),
+        cmd => cmd,
+    };
     let dir = claimdag::resolve_dir(cli.dir.clone());
     // A verb that only reads says when there is no graph to read. An empty
     // list and a seat pointed at nothing look the same to a caller, and they
@@ -559,17 +583,17 @@ fn run() -> Result<(), String> {
     // A writer holds the directory from load to save, so two processes
     // cannot both read the same snapshot and each write back without the
     // other's change.
-    let _lock = if reads_only(&cli.cmd) {
+    let _lock = if reads_only(&cmd) {
         None
     } else {
         Some(claimdag::lock_dir(&dir)?)
     };
-    let mut g = if reads_only(&cli.cmd) {
+    let mut g = if reads_only(&cmd) {
         WorkGraph::open_dir(&dir).map_err(|absent| absent.to_string())?
     } else {
         WorkGraph::load_for_write(&dir).map_err(|unreadable| unreadable.to_string())?
     };
-    match cli.cmd {
+    match cmd {
         Cmd::List {
             terminal,
             archived,
@@ -797,6 +821,7 @@ fn run() -> Result<(), String> {
             println!("{}  live", id.to_hex());
         }
         Cmd::Where { .. } => unreachable!("where is answered before the graph is opened"),
+        Cmd::Help { .. } => unreachable!("help is answered before the graph is opened"),
     }
     for line in g.warnings() {
         claimdag::emit_warn(&dir, line);

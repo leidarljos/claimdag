@@ -350,6 +350,17 @@ fn unreadable_arguments_exit_2() {
 }
 
 #[test]
+fn help_subcommand_accepts_help_flag() {
+    let out = claimdag_bare(&["help", "--help"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("Usage: claimdag help [COMMAND]"),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}
+
+#[test]
 fn repeated_complete_prints_the_stored_terminal_status() {
     let dir = tempfile::tempdir().unwrap();
     let id = held(dir.path());
