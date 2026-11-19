@@ -348,3 +348,33 @@ fn unreadable_arguments_exit_2() {
     let out = claimdag_bare(&["--not-a-flag"]);
     assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
 }
+
+#[test]
+fn repeated_complete_prints_the_stored_terminal_status() {
+    let dir = tempfile::tempdir().unwrap();
+    let id = held(dir.path());
+    let first = claimdag(
+        dir.path(),
+        &["complete", &id, "--status", "done", "--actor", SEAT_A],
+    );
+    assert_eq!(first.status.code(), Some(0), "{}", stderr(&first));
+    assert_eq!(stdout(&first), format!("{id}  done"));
+
+    let again = claimdag(
+        dir.path(),
+        &["complete", &id, "--status", "failed", "--actor", SEAT_A],
+    );
+    assert_eq!(again.status.code(), Some(0), "{}", stderr(&again));
+    assert_eq!(stdout(&again), format!("{id}  done"));
+    assert_eq!(status_of(dir.path(), &id), "done");
+
+    let forced = claimdag(
+        dir.path(),
+        &["complete", &id, "--status", "cancelled", "--force"],
+    );
+    assert_eq!(forced.status.code(), Some(0), "{}", stderr(&forced));
+    assert_eq!(stdout(&forced), format!("{id}  done"));
+    let log = std::fs::read_to_string(dir.path().join("forced.log")).unwrap();
+    assert!(log.contains("done"), "{log}");
+    assert!(!log.contains("cancelled"), "{log}");
+}

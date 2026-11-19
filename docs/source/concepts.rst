@@ -66,7 +66,9 @@ dependencies in charge: a node with an unfinished dependency is stored as
 is ``claimed`` or ``running``.
 
 Terminal status stays until ``reopen``, which returns the node to ready and
-moves the generation. The snapshot keeps no record of the earlier
+moves the generation. Calling ``complete`` again with another terminal
+status leaves the stored status unchanged and prints that stored status.
+The snapshot keeps no record of the earlier
 completion. ``archive`` sets a flag on a terminal node and moves the
 generation. The status field stays ``done``, ``failed``, or ``cancelled``. The
 node stays in the snapshot. ``list`` hides archived nodes unless ``--archived``

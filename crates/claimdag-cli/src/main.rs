@@ -638,7 +638,8 @@ fn run() -> Result<(), String> {
             if force {
                 let holder = g.complete_forced(id, status, &summary, gen)?;
                 g.save_dir(&dir)?;
-                log_forced(&dir, "complete", id, holder, status.as_str())?;
+                let actual = g.get(id).map(|n| n.status).unwrap_or(status);
+                log_forced(&dir, "complete", id, holder, actual.as_str())?;
             } else {
                 let actor = match actor {
                     Some(actor) => parse_id(&actor, &g)?,
@@ -649,7 +650,10 @@ fn run() -> Result<(), String> {
             }
             match g.pruned(id) {
                 Some(was) => print_pruned(id, was),
-                None => println!("{}  {}", id.to_hex(), status.as_str()),
+                None => {
+                    let actual = g.get(id).map(|n| n.status).unwrap_or(status);
+                    println!("{}  {}", id.to_hex(), actual.as_str());
+                }
             }
         }
         Cmd::Renew { id, actor } => {
