@@ -4,7 +4,8 @@ Serve the graph
 ===============
 
 ``claimdag-mcp`` speaks the Model Context Protocol on standard input and
-output. It opens the directory from :doc:`Point at a graph <howto-dir>`.
+output. It accepts ``--dir DIR``, ``--help``, and ``--version``, and otherwise
+opens the directory from :doc:`Point at a graph <howto-dir>`.
 Install it from the :doc:`installation <install>` page.
 
 The tools that read are ``claimdag_ready``, ``claimdag_ready_balanced``,

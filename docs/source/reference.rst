@@ -61,7 +61,7 @@ The verbs and flags below are what ``claimdag --help`` and each verb's
    Usage: claimdag get <ID>
 
    Arguments:
-     <ID>
+     <ID>  32-hex node id
 
    Options:
      -h, --help  Print help
@@ -72,13 +72,13 @@ The verbs and flags below are what ``claimdag --help`` and each verb's
    Usage: claimdag upsert [OPTIONS]
 
    Options:
-         --id <ID>
-         --kind <KIND>        [default: task]
-         --status <STATUS>    Omit to keep the status an existing node already has. A new node starts at todo
-         --role <ROLE>        [default: unset]
+         --id <ID>            32-hex node id. Omit to mint a new node
+         --kind <KIND>        Node kind ('unset', 'goal', 'step', 'task', 'molecule'). Omit to keep an existing node's kind; a new node defaults to task
+         --status <STATUS>    Node status ('todo', 'ready', 'blocked'). Omit to keep the status an existing node already has; a new node starts at todo
+         --role <ROLE>        Worker role ('unset', 'explore', 'architect', 'implementor', 'verifier', 'orchestrator', 'general') [default: unset]
          --parent <PARENT>    Parent work id (32 hex). Zero means unset [default: 00000000000000000000000000000000]
-         --summary <SUMMARY>  [default: ""]
-         --actor <ACTOR>      [default: 00000000000000000000000000000000]
+         --summary <SUMMARY>  Short text summary for the node [default: ""]
+         --actor <ACTOR>      Caller actor id (32 hex) [default: 00000000000000000000000000000000]
      -h, --help               Print help
 
    $ claimdag claim --help
@@ -87,11 +87,11 @@ The verbs and flags below are what ``claimdag --help`` and each verb's
    Usage: claimdag claim [OPTIONS] --assignee <ASSIGNEE> <ID>
 
    Arguments:
-     <ID>
+     <ID>  32-hex node id
 
    Options:
-         --assignee <ASSIGNEE>
-         --gen <GEN>
+         --assignee <ASSIGNEE>  Claiming worker id (32 hex)
+         --gen <GEN>            Expected generation from the node. Omit to ignore generation
      -h, --help                 Print help
 
    $ claimdag ready --help
@@ -100,7 +100,7 @@ The verbs and flags below are what ``claimdag --help`` and each verb's
    Usage: claimdag ready [OPTIONS]
 
    Options:
-         --role <ROLE>          Filter or prioritize by role ('explore', 'architect', 'implementor', 'verifier', 'orchestrator', 'general') [default: unset]
+         --role <ROLE>          Filter or prioritize by role ('unset', 'explore', 'architect', 'implementor', 'verifier', 'orchestrator', 'general') [default: unset]
          --assignee <ASSIGNEE>  Requesting worker id (32 hex) for dispersed load balancing [default: 00000000000000000000000000000000]
          --slack <SLACK>        Critical depth slack for candidate dispersion [default: 1]
          --balanced             Order by balanced suitability and worker dispersion rather than static depth
@@ -114,7 +114,7 @@ The verbs and flags below are what ``claimdag --help`` and each verb's
 
    Options:
          --assignee <ASSIGNEE>  Who is taking it, 32 hex characters
-         --role <ROLE>          Desired role affinity ('explore', 'architect', 'implementor', 'verifier', 'orchestrator', 'general') [default: unset]
+         --role <ROLE>          Desired role affinity ('unset', 'explore', 'architect', 'implementor', 'verifier', 'orchestrator', 'general') [default: unset]
          --slack <SLACK>        Allowed critical depth slack for candidate dispersion (default 1) [default: 1]
      -h, --help                 Print help
 
@@ -143,23 +143,27 @@ The verbs and flags below are what ``claimdag --help`` and each verb's
 
    Arguments:
      <ID>
-
+             32-hex node id
 
    Options:
          --status <STATUS>
+             Terminal status ('done', 'failed', 'cancelled')
+
              [default: done]
 
          --summary <SUMMARY>
+             Updated summary text. Omit or pass empty to keep the existing summary
+
              [default: ""]
 
          --actor <ACTOR>
-
+             Caller actor id (32 hex)
 
          --force
              Finish it with no actor, whoever holds it. Logged to forced.log
 
          --gen <GEN>
-
+             Expected generation from claim. Omit to skip the check
 
      -h, --help
              Print help (see a summary with '-h')
@@ -170,10 +174,10 @@ The verbs and flags below are what ``claimdag --help`` and each verb's
    Usage: claimdag renew [OPTIONS] <ID>
 
    Arguments:
-     <ID>
+     <ID>  32-hex node id
 
    Options:
-         --actor <ACTOR>  [default: 00000000000000000000000000000000]
+         --actor <ACTOR>  Caller actor id (32 hex) [default: 00000000000000000000000000000000]
      -h, --help           Print help
 
    $ claimdag release --help
@@ -201,11 +205,11 @@ The verbs and flags below are what ``claimdag --help`` and each verb's
 
    Arguments:
      <ID>
-
+             32-hex node id
 
    Options:
          --actor <ACTOR>
-
+             Caller actor id (32 hex)
 
          --force
              Hand it back with no actor, whoever holds it. Logged to forced.log
@@ -219,10 +223,10 @@ The verbs and flags below are what ``claimdag --help`` and each verb's
    Usage: claimdag reopen [OPTIONS] <ID>
 
    Arguments:
-     <ID>
+     <ID>  32-hex node id
 
    Options:
-         --actor <ACTOR>  [default: 00000000000000000000000000000000]
+         --actor <ACTOR>  Caller actor id (32 hex) [default: 00000000000000000000000000000000]
      -h, --help           Print help
 
    $ claimdag reclaim --help
@@ -234,6 +238,8 @@ The verbs and flags below are what ``claimdag --help`` and each verb's
 
    Options:
          --lease <LEASE>
+             Quiet threshold in seconds before a claim is returned
+
              [default: 900]
 
      -h, --help
@@ -245,11 +251,11 @@ The verbs and flags below are what ``claimdag --help`` and each verb's
    Usage: claimdag link [OPTIONS] <PARENT> <CHILD>
 
    Arguments:
-     <PARENT>
-     <CHILD>
+     <PARENT>  32-hex id of the dependency that must finish first
+     <CHILD>   32-hex id of the dependent node
 
    Options:
-         --actor <ACTOR>  [default: 00000000000000000000000000000000]
+         --actor <ACTOR>  Caller actor id (32 hex) [default: 00000000000000000000000000000000]
      -h, --help           Print help
 
    $ claimdag unlink --help
@@ -258,11 +264,11 @@ The verbs and flags below are what ``claimdag --help`` and each verb's
    Usage: claimdag unlink [OPTIONS] <PARENT> <CHILD>
 
    Arguments:
-     <PARENT>
-     <CHILD>
+     <PARENT>  32-hex id of the dependency
+     <CHILD>   32-hex id of the dependent node
 
    Options:
-         --actor <ACTOR>  [default: 00000000000000000000000000000000]
+         --actor <ACTOR>  Caller actor id (32 hex) [default: 00000000000000000000000000000000]
      -h, --help           Print help
 
    $ claimdag archive --help
@@ -271,10 +277,10 @@ The verbs and flags below are what ``claimdag --help`` and each verb's
    Usage: claimdag archive [OPTIONS] <ID>
 
    Arguments:
-     <ID>
+     <ID>  32-hex node id
 
    Options:
-         --actor <ACTOR>  [default: 00000000000000000000000000000000]
+         --actor <ACTOR>  Caller actor id (32 hex) [default: 00000000000000000000000000000000]
      -h, --help           Print help
 
    $ claimdag unarchive --help
@@ -283,10 +289,10 @@ The verbs and flags below are what ``claimdag --help`` and each verb's
    Usage: claimdag unarchive [OPTIONS] <ID>
 
    Arguments:
-     <ID>
+     <ID>  32-hex node id
 
    Options:
-         --actor <ACTOR>  [default: 00000000000000000000000000000000]
+         --actor <ACTOR>  Caller actor id (32 hex) [default: 00000000000000000000000000000000]
      -h, --help           Print help
 
    $ claimdag where --help
@@ -311,7 +317,9 @@ It is a text block after the row.
 A default directory another user owns is opened the same way.
 The rule for that is ``not-owner``.
 
-``claim`` prints the new generation. ``renew`` moves the lease and keeps that
+``claim`` prints the new generation. Omit ``--gen`` on ``claim`` or ``complete``
+to ignore generation; ``--gen 0`` is refused as a mismatch because initial
+generation is 1. ``renew`` moves the lease and keeps that
 generation. ``get`` prints the node and its dependencies. ``complete --status
 done`` is refused while a dependency is unfinished. ``reopen`` brings a
 terminal node back to ready and moves the generation; no record of the

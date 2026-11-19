@@ -336,3 +336,27 @@ fn archive_of_a_live_node_names_the_node() {
     let archived = claimdag(dir.path(), &["archive", &held]);
     assert_eq!(archived.status.code(), Some(0), "{}", stderr(&archived));
 }
+
+#[test]
+fn gen_zero_is_refused_on_both_claim_and_complete() {
+    let dir = tempfile::tempdir().unwrap();
+    let id = ready(dir.path(), "fenced");
+
+    let claim_zero = claimdag(
+        dir.path(),
+        &["claim", &id, "--assignee", HOLDER, "--gen", "0"],
+    );
+    assert_refused(
+        &claim_zero,
+        &format!("claim: gen mismatch. node {id} is generation 1"),
+    );
+
+    let claimed = claimdag(dir.path(), &["claim", &id, "--assignee", HOLDER]);
+    assert_eq!(claimed.status.code(), Some(0), "{}", stderr(&claimed));
+
+    let complete_zero = claimdag(
+        dir.path(),
+        &["complete", &id, "--actor", HOLDER, "--gen", "0"],
+    );
+    assert_refused(&complete_zero, "complete: gen mismatch");
+}

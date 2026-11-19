@@ -4,17 +4,20 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use claimdag::{WorkFields, WorkGraph, WorkId, WorkKind, WorkNode, WorkRole, WorkStatus};
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(
     name = "claimdag",
     version,
     about = "CAS claim and complete on a DAG",
+    disable_help_subcommand = true,
     after_help = "Exit status is 0 when the verb ran, 1 when it was refused, and 2 when the arguments could not be read. A refusal names the node, who holds it and the unix second that holder was last written when those apply, and the command that resolves it."
 )]
 struct Cli {
-    /// Directory that holds work.bin (else CLAIMDAG_DIR, else the runtime dir, else the state dir).
+    /// Directory with work.bin (else CLAIMDAG_DIR, else
+    /// $XDG_RUNTIME_DIR/claimdag, $XDG_STATE_HOME/claimdag,
+    /// ~/.local/state/claimdag, /tmp/claimdag-UID, then /tmp/claimdag).
     #[arg(long)]
     dir: Option<PathBuf>,
     #[command(subcommand)]
@@ -39,37 +42,48 @@ enum Cmd {
         json: bool,
     },
     /// Print one node by 32-hex id.
-    Get { id: String },
+    Get {
+        /// 32-hex node id.
+        id: String,
+    },
     /// Create or update a node. Omit --id to mint.
     Upsert {
+        /// 32-hex node id. Omit to mint a new node.
         #[arg(long)]
         id: Option<String>,
-        #[arg(long, default_value = "task")]
-        kind: String,
-        /// Omit to keep the status an existing node already has. A new node starts at todo.
+        /// Node kind ('unset', 'goal', 'step', 'task', 'molecule'). Omit to keep an existing node's kind; a new node defaults to task.
+        #[arg(long)]
+        kind: Option<String>,
+        /// Node status ('todo', 'ready', 'blocked'). Omit to keep the status an existing node already has; a new node starts at todo.
         #[arg(long)]
         status: Option<String>,
+        /// Worker role ('unset', 'explore', 'architect', 'implementor', 'verifier', 'orchestrator', 'general').
         #[arg(long, default_value = "unset")]
         role: String,
         /// Parent work id (32 hex). Zero means unset.
         #[arg(long, default_value = "00000000000000000000000000000000")]
         parent: String,
+        /// Short text summary for the node.
         #[arg(long, default_value = "")]
         summary: String,
+        /// Caller actor id (32 hex).
         #[arg(long, default_value = "00000000000000000000000000000000")]
         actor: String,
     },
     /// Compare-and-swap claim. Omit --gen to ignore generation.
     Claim {
+        /// 32-hex node id.
         id: String,
+        /// Claiming worker id (32 hex).
         #[arg(long)]
         assignee: String,
+        /// Expected generation from the node. Omit to ignore generation.
         #[arg(long)]
         gen: Option<u64>,
     },
     /// View ready nodes that can be taken now: unblocked and unfinished.
     Ready {
-        /// Filter or prioritize by role ('explore', 'architect', 'implementor', 'verifier', 'orchestrator', 'general').
+        /// Filter or prioritize by role ('unset', 'explore', 'architect', 'implementor', 'verifier', 'orchestrator', 'general').
         #[arg(long, default_value = "unset")]
         role: String,
         /// Requesting worker id (32 hex) for dispersed load balancing.
@@ -90,7 +104,7 @@ enum Cmd {
         /// Who is taking it, 32 hex characters.
         #[arg(long)]
         assignee: String,
-        /// Desired role affinity ('explore', 'architect', 'implementor', 'verifier', 'orchestrator', 'general').
+        /// Desired role affinity ('unset', 'explore', 'architect', 'implementor', 'verifier', 'orchestrator', 'general').
         #[arg(long, default_value = "unset")]
         role: String,
         /// Allowed critical depth slack for candidate dispersion (default 1).
@@ -98,70 +112,40 @@ enum Cmd {
         slack: usize,
     },
     /// Mark a node terminal (done, failed, or cancelled).
-    ///
-    /// Pass the --gen returned by claim to be refused if the lease was
-    /// reclaimed while the work was in flight. Omitting it finishes the node
-    /// whatever happened to the claim, which is the only way to speak for a
-    /// node nobody holds.
-    ///
-    /// --actor names who is finishing it.
-    ///
-    /// With none, the call still finishes the node.
-    ///
-    /// It records a warning on stderr and in warn.log.
-    ///
-    /// The warning is allow, warn, and no-actor, separated by tabs.
-    ///
-    /// An actor who is not the holder is recorded the same way, with not-assignee.
-    ///
-    /// The call still finishes the node.
-    ///
-    /// --force finishes it for nobody.
-    ///
-    /// It appends a line to forced.log instead of that warning.
+    /// Pass the --gen returned by claim to be refused if the lease was reclaimed while the work was in flight. Omitting it finishes the node whatever happened to the claim, which is the only way to speak for a node nobody holds. --actor names who is finishing it. With none, the call still finishes the node. It records a warning on stderr and in warn.log. The warning is allow, warn, and no-actor, separated by tabs. An actor who is not the holder is recorded the same way, with not-assignee. The call still finishes the node. --force finishes it for nobody and appends a line to forced.log instead of that warning.
     Complete {
+        /// 32-hex node id.
         id: String,
+        /// Terminal status ('done', 'failed', 'cancelled').
         #[arg(long, default_value = "done")]
         status: String,
+        /// Updated summary text. Omit or pass empty to keep the existing summary.
         #[arg(long, default_value = "")]
         summary: String,
+        /// Caller actor id (32 hex).
         #[arg(long)]
         actor: Option<String>,
         /// Finish it with no actor, whoever holds it. Logged to forced.log.
         #[arg(long, conflicts_with = "actor")]
         force: bool,
+        /// Expected generation from claim. Omit to skip the check.
         #[arg(long)]
         gen: Option<u64>,
     },
     /// Say the holder is still working, moving the lease without changing hands.
     Renew {
+        /// 32-hex node id.
         id: String,
+        /// Caller actor id (32 hex).
         #[arg(long, default_value = "00000000000000000000000000000000")]
         actor: String,
     },
     /// Hand one claim back on purpose: ready again, assignee cleared, generation moved.
-    ///
-    /// The way off a claim before the work is terminal. A holder that stops
-    /// without this stays busy until the lease runs out, and cannot claim
-    /// anything else meanwhile.
-    ///
-    /// --actor names the holder.
-    ///
-    /// With none, the call still hands the claim back.
-    ///
-    /// It records a warning on stderr and in warn.log.
-    ///
-    /// The warning is allow, warn, and no-actor, separated by tabs.
-    ///
-    /// An actor who is not the holder is recorded the same way, with not-assignee.
-    ///
-    /// The call still hands the claim back.
-    ///
-    /// --force hands the claim back whoever holds it.
-    ///
-    /// It appends a line to forced.log instead of that warning.
+    /// The way off a claim before the work is terminal. A holder that stops without this stays busy until the lease runs out and cannot claim anything else meanwhile. --actor names the holder. With none, the call still hands the claim back. It records a warning on stderr and in warn.log. The warning is allow, warn, and no-actor, separated by tabs. An actor who is not the holder is recorded the same way, with not-assignee. The call still hands the claim back. --force hands the claim back whoever holds it and appends a line to forced.log instead of that warning.
     Release {
+        /// 32-hex node id.
         id: String,
+        /// Caller actor id (32 hex).
         #[arg(long)]
         actor: Option<String>,
         /// Hand it back with no actor, whoever holds it. Logged to forced.log.
@@ -170,7 +154,9 @@ enum Cmd {
     },
     /// Bring a finished node back to ready, generation moved, so the same work can be taken again.
     Reopen {
+        /// 32-hex node id.
         id: String,
+        /// Caller actor id (32 hex).
         #[arg(long, default_value = "00000000000000000000000000000000")]
         actor: String,
     },
@@ -179,32 +165,43 @@ enum Cmd {
     /// A claim with no expiry is a claim a crashed worker keeps, and the
     /// holder's identity stays busy with it. This is what returns both.
     Reclaim {
+        /// Quiet threshold in seconds before a claim is returned.
         #[arg(long, default_value_t = claimdag::DEFAULT_LEASE_SECS)]
         lease: u64,
     },
     /// Add a boolean hard dependency (parent before child).
     Link {
+        /// 32-hex id of the dependency that must finish first.
         parent: String,
+        /// 32-hex id of the dependent node.
         child: String,
+        /// Caller actor id (32 hex).
         #[arg(long, default_value = "00000000000000000000000000000000")]
         actor: String,
     },
     /// Drop a boolean hard dependency. Missing edge is ok.
     Unlink {
+        /// 32-hex id of the dependency.
         parent: String,
+        /// 32-hex id of the dependent node.
         child: String,
+        /// Caller actor id (32 hex).
         #[arg(long, default_value = "00000000000000000000000000000000")]
         actor: String,
     },
     /// Soft-hide a terminal node. Not a delete.
     Archive {
+        /// 32-hex node id.
         id: String,
+        /// Caller actor id (32 hex).
         #[arg(long, default_value = "00000000000000000000000000000000")]
         actor: String,
     },
     /// Clear the archive flag. Status stays terminal.
     Unarchive {
+        /// 32-hex node id.
         id: String,
+        /// Caller actor id (32 hex).
         #[arg(long, default_value = "00000000000000000000000000000000")]
         actor: String,
     },
@@ -217,11 +214,42 @@ enum Cmd {
         #[arg(long = "move")]
         move_graph: bool,
     },
+    /// Print this message or the help of the given subcommand(s).
+    Help {
+        /// Optional command to describe.
+        command: Option<String>,
+    },
 }
 
 /// Characters in a work id. `WorkId` is two `u64`s, printed as 16 hex
 /// characters each, and `WorkId::from_hex` accepts that width only.
 const ID_HEX_CHARS: usize = 16 + 16;
+
+fn parse_kind(raw: &str) -> Result<WorkKind, String> {
+    WorkKind::parse_str(raw)
+        .ok_or_else(|| format!("bad kind {raw}: expected unset, goal, step, task, or molecule"))
+}
+
+fn parse_status(raw: &str) -> Result<WorkStatus, String> {
+    WorkStatus::parse_str(raw).ok_or_else(|| {
+        format!(
+            "bad status {raw}: expected todo, ready, blocked, claimed, running, done, failed, or cancelled"
+        )
+    })
+}
+
+fn parse_terminal_status(raw: &str) -> Result<WorkStatus, String> {
+    WorkStatus::parse_str(raw)
+        .ok_or_else(|| format!("bad status {raw}: expected done, failed, or cancelled"))
+}
+
+fn parse_role(raw: &str) -> Result<WorkRole, String> {
+    WorkRole::parse_str(raw).ok_or_else(|| {
+        format!(
+            "bad role {raw}: expected unset, explore, architect, implementor, verifier, orchestrator, or general"
+        )
+    })
+}
 
 fn parse_id(s: &str, g: &WorkGraph) -> Result<WorkId, String> {
     if let Some(id) = WorkId::from_hex(s) {
@@ -306,6 +334,11 @@ fn print_list_line(n: &WorkNode) {
     } else {
         format!("  {}", n.role.as_str())
     };
+    let summary = if n.summary.trim().is_empty() {
+        n.id.to_hex()[..8].to_string()
+    } else {
+        n.summary.clone()
+    };
     println!(
         "{}  {}  {}{}{}  gen={}{}  {}",
         n.id.to_hex(),
@@ -315,7 +348,7 @@ fn print_list_line(n: &WorkNode) {
         role,
         n.cas_gen,
         flag,
-        n.summary
+        summary
     );
 }
 
@@ -399,6 +432,11 @@ fn print_get(n: &WorkNode) {
             .collect::<Vec<_>>()
             .join(" ")
     };
+    let summary = if n.summary.trim().is_empty() {
+        n.id.to_hex()[..8].to_string()
+    } else {
+        n.summary.clone()
+    };
     println!(
         "{}  {}  {}  {}  gen={}  assignee={}  parent={}  {}",
         n.id.to_hex(),
@@ -408,7 +446,7 @@ fn print_get(n: &WorkNode) {
         n.cas_gen,
         n.assignee.to_hex(),
         n.parent.to_hex(),
-        n.summary
+        summary
     );
     println!("deps  {deps}");
 }
@@ -488,11 +526,29 @@ fn where_is(dir: Option<PathBuf>, move_graph: bool) -> Result<(), String> {
     Ok(())
 }
 
+fn print_help_for(command: Option<String>) -> Result<(), String> {
+    let mut root = Cli::command();
+    if let Some(command) = command {
+        let Some(subcommand) = root.find_subcommand_mut(&command) else {
+            return Err(format!("error: unrecognized subcommand '{command}'"));
+        };
+        subcommand
+            .print_help()
+            .map_err(|err| format!("help: {err}"))?;
+    } else {
+        root.print_help().map_err(|err| format!("help: {err}"))?;
+    }
+    println!();
+    Ok(())
+}
+
 fn run() -> Result<(), String> {
     let cli = Cli::parse();
-    if let Cmd::Where { move_graph } = cli.cmd {
-        return where_is(cli.dir, move_graph);
-    }
+    let cmd = match cli.cmd {
+        Cmd::Where { move_graph } => return where_is(cli.dir, move_graph),
+        Cmd::Help { command } => return print_help_for(command),
+        cmd => cmd,
+    };
     let dir = claimdag::resolve_dir(cli.dir.clone());
     // A verb that only reads says when there is no graph to read. An empty
     // list and a seat pointed at nothing look the same to a caller, and they
@@ -500,17 +556,17 @@ fn run() -> Result<(), String> {
     // A writer holds the directory from load to save, so two processes
     // cannot both read the same snapshot and each write back without the
     // other's change.
-    let _lock = if reads_only(&cli.cmd) {
+    let _lock = if reads_only(&cmd) {
         None
     } else {
         Some(claimdag::lock_dir(&dir)?)
     };
-    let mut g = if reads_only(&cli.cmd) {
+    let mut g = if reads_only(&cmd) {
         WorkGraph::open_dir(&dir).map_err(|absent| absent.to_string())?
     } else {
         WorkGraph::load_for_write(&dir).map_err(|unreadable| unreadable.to_string())?
     };
-    match cli.cmd {
+    match cmd {
         Cmd::List {
             terminal,
             archived,
@@ -551,22 +607,23 @@ fn run() -> Result<(), String> {
                 Some(s) => parse_id(&s, &g)?,
                 None => WorkId::ZERO,
             };
-            let kind = WorkKind::parse_str(&kind).ok_or_else(|| format!("bad kind {kind}"))?;
+            let present = (!wid.is_zero()).then(|| g.get(wid)).flatten();
+            // An omitted --kind on an existing node keeps that node's kind.
+            // A new node defaults to task, matching the MCP server.
+            let kind = match kind {
+                Some(raw) => parse_kind(&raw)?,
+                None if present.is_some() => WorkKind::Unset,
+                None => WorkKind::Task,
+            };
             // An omitted --status on a node already in the graph repeats that
             // node's status, so the write changes metadata only. A new node,
-            // including an id the graph does not hold yet, still starts at
+            // including an id the graph does not store yet, still starts at
             // todo. Readiness is derived from the dependencies after that.
             let status = match status {
-                Some(raw) => {
-                    WorkStatus::parse_str(&raw).ok_or_else(|| format!("bad status {raw}"))?
-                }
-                None if !wid.is_zero() => g
-                    .get(wid)
-                    .map(|node| node.status)
-                    .unwrap_or(WorkStatus::Todo),
-                None => WorkStatus::Todo,
+                Some(raw) => parse_status(&raw)?,
+                None => present.map(|node| node.status).unwrap_or(WorkStatus::Todo),
             };
-            let role = WorkRole::parse_str(&role).ok_or_else(|| format!("bad role {role}"))?;
+            let role = parse_role(&role)?;
             let parent = parse_id(&parent, &g)?;
             let actor = parse_id(&actor, &g)?;
             let out = g.upsert(
@@ -584,13 +641,9 @@ fn run() -> Result<(), String> {
             println!("{}", out.to_hex());
         }
         Cmd::Claim { id, assignee, gen } => {
-            let expected = match gen {
-                None | Some(0) => None,
-                Some(g) => Some(g),
-            };
             let id = parse_id(&id, &g)?;
             let assignee = parse_id(&assignee, &g)?;
-            let cas = g.claim(id, assignee, expected)?;
+            let cas = g.claim(id, assignee, gen)?;
             g.save_dir(&dir)?;
             println!("gen={cas}");
         }
@@ -601,7 +654,7 @@ fn run() -> Result<(), String> {
             balanced,
             json,
         } => {
-            let role = WorkRole::parse_str(&role).ok_or_else(|| format!("bad role {role}"))?;
+            let role = parse_role(&role)?;
             let assignee = parse_id(&assignee, &g)?;
             let nodes = if balanced || role != WorkRole::Unset || !assignee.is_zero() {
                 g.ready_view_balanced(role, assignee, slack)
@@ -619,7 +672,7 @@ fn run() -> Result<(), String> {
             slack,
         } => {
             let assignee = parse_id(&assignee, &g)?;
-            let role = WorkRole::parse_str(&role).ok_or_else(|| format!("bad role {role}"))?;
+            let role = parse_role(&role)?;
             let (id, cas) = g.claim_next(assignee, role, slack)?;
             g.save_dir(&dir)?;
             println!("{}  gen={cas}", id.to_hex());
@@ -632,13 +685,13 @@ fn run() -> Result<(), String> {
             force,
             gen,
         } => {
-            let status =
-                WorkStatus::parse_str(&status).ok_or_else(|| format!("bad status {status}"))?;
+            let status = parse_terminal_status(&status)?;
             let id = parse_id(&id, &g)?;
             if force {
                 let holder = g.complete_forced(id, status, &summary, gen)?;
                 g.save_dir(&dir)?;
-                log_forced(&dir, "complete", id, holder, status.as_str())?;
+                let actual = g.get(id).map(|n| n.status).unwrap_or(status);
+                log_forced(&dir, "complete", id, holder, actual.as_str())?;
             } else {
                 let actor = match actor {
                     Some(actor) => parse_id(&actor, &g)?,
@@ -649,7 +702,10 @@ fn run() -> Result<(), String> {
             }
             match g.pruned(id) {
                 Some(was) => print_pruned(id, was),
-                None => println!("{}  {}", id.to_hex(), status.as_str()),
+                None => {
+                    let actual = g.get(id).map(|n| n.status).unwrap_or(status);
+                    println!("{}  {}", id.to_hex(), actual.as_str());
+                }
             }
         }
         Cmd::Renew { id, actor } => {
@@ -738,6 +794,7 @@ fn run() -> Result<(), String> {
             println!("{}  live", id.to_hex());
         }
         Cmd::Where { .. } => unreachable!("where is answered before the graph is opened"),
+        Cmd::Help { .. } => unreachable!("help is answered before the graph is opened"),
     }
     for line in g.warnings() {
         claimdag::emit_warn(&dir, line);

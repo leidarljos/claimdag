@@ -589,7 +589,7 @@ fn every_tool_returns_an_answer_and_an_error() {
     // The directory exists and holds no snapshot. That is a missing graph,
     // which is a different answer from an empty one.
     let missing = format!(
-        "no work graph at {}: the directory holds no work.bin. Claim something to create it",
+        "no work graph at {}: the directory holds no work.bin. Run claimdag upsert --summary \"...\" to create it",
         dir.path().display()
     );
     seat.refused("claimdag_ready", "{}", &missing);

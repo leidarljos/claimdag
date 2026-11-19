@@ -36,10 +36,11 @@ PAGES = (
     ROOT / "docs" / "orgmode" / "explanation.org",
 )
 
-# The directories the two pages name. CI has no /var/lib/seat, and
-# /tmp/demo-claims would be shared with whatever else is on the machine.
-# Both become the scratch directory this run created.
-DOC_DIRS = ("/tmp/demo-claims", "/var/lib/seat")
+# The directories the pages name. /tmp/demo-claims and /tmp/demo-seat
+# would be shared with whatever else is on the machine, so both become the
+# scratch directory this run created.
+DOC_DIRS = ("/tmp/demo-claims", "/tmp/demo-seat", "/var/lib/seat")
+INTRO_PAGES = {ROOT / "README.md", ROOT / "docs" / "orgmode" / "getting-started.org"}
 
 # Eight hex digits is how these pages abbreviate an id. The program prints
 # 32, which is the width of a WorkId. A shorter or longer abbreviation is
@@ -50,6 +51,13 @@ _ID_TOKEN = re.compile(r"[0-9a-f]{8}\.\.\.")
 _UNIX_TOKEN = re.compile(r"since unix \.\.\.")
 _WILDCARD = re.compile(rf"{_ID_TOKEN.pattern}|{_UNIX_TOKEN.pattern}")
 _PLACEHOLDER = re.compile(r"<[a-z]+>")
+
+
+def check_readme_plain_text_symbols() -> None:
+    """README examples stay plain text, not raw LaTeX."""
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    if r"($\Delta$)" in readme:
+        raise SystemExit("run-doc-examples: README.md uses raw LaTeX for delta")
 
 
 def line_regex(expected: str) -> re.Pattern[str]:
@@ -235,6 +243,10 @@ def run_page(page: pathlib.Path, env: dict[str, str]) -> list[str]:
     if not ran:
         return [f"{page}: no commands ran"]
     for step in ran:
+        if page in INTRO_PAGES and "/var/lib/seat" in step.command:
+            problems.append(
+                f"{page.name}: non-writable /var/lib/seat in intro example: {step.command}"
+            )
         for directory in DOC_DIRS:
             if directory in step.run:
                 problems.append(f"{page.name}: {directory} still in: {step.command}")
@@ -292,6 +304,7 @@ def run_page(page: pathlib.Path, env: dict[str, str]) -> list[str]:
 
 def main() -> int:
     check_abbreviation_rule()
+    check_readme_plain_text_symbols()
     claimdag = shutil.which("claimdag")
     if claimdag is None:
         print("run-doc-examples: claimdag is not on PATH", flush=True)

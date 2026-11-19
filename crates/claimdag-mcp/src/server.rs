@@ -185,19 +185,28 @@ fn invalid(why: String) -> Fail {
 impl ClaimdagServer {
     /// Open on the graph this seat keeps.
     ///
-    /// `CLAIMDAG_DIR` fixes the directory. Otherwise the defaults are
-    /// resolved again on each call, and this startup resolve only says,
+    /// `--dir` or `CLAIMDAG_DIR` fixes the directory. Otherwise the defaults
+    /// are resolved again on each call, and this startup resolve only says,
     /// once, when another location holds work.
     #[must_use]
-    pub fn from_env() -> Self {
-        let named = std::env::var_os("CLAIMDAG_DIR").is_some_and(|raw| !raw.is_empty());
+    pub fn from_dir(explicit: Option<PathBuf>) -> Self {
+        let explicit = explicit.filter(|path| !path.as_os_str().is_empty());
+        let named = explicit.is_some()
+            || std::env::var_os("CLAIMDAG_DIR").is_some_and(|raw| !raw.is_empty());
         // Said once at startup when another location holds work. A call uses
         // this path only when the directory was named; the defaults are
         // resolved again in `dir`.
-        let resolved = claimdag::resolve_dir(None);
+        let resolved = claimdag::resolve_dir(explicit);
         Self {
             dir: named.then_some(resolved),
         }
+    }
+
+    /// Open on the graph this seat keeps from environment defaults.
+    #[cfg(test)]
+    #[must_use]
+    pub fn from_env() -> Self {
+        Self::from_dir(None)
     }
 
     /// Open on a named directory, for a test.

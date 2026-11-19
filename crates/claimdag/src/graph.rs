@@ -442,6 +442,8 @@ pub struct WorkGraph {
 pub enum Absent {
     /// No directory at all: this seat has never had a graph here.
     NoDirectory(PathBuf),
+    /// A path exists there, but it is not a directory.
+    NotDirectory(PathBuf),
     /// A directory with no snapshot in it.
     NoSnapshot(PathBuf),
     /// A snapshot that could not be parsed, and the reason given.
@@ -454,13 +456,19 @@ impl std::fmt::Display for Absent {
             Self::NoDirectory(dir) => write!(
                 f,
                 "no work graph at {}: the directory does not exist, so nothing has been claimed on this seat. \
-                 Set CLAIMDAG_DIR, pass --dir, or claim something to create it",
+                 Set CLAIMDAG_DIR, pass --dir, or run claimdag upsert --summary \"...\" to create it",
+                dir.display()
+            ),
+            Self::NotDirectory(dir) => write!(
+                f,
+                "no work graph at {}: the path is not a directory. \
+                 Set CLAIMDAG_DIR, pass --dir, or choose a directory for claimdag upsert --summary \"...\"",
                 dir.display()
             ),
             Self::NoSnapshot(dir) => write!(
                 f,
                 "no work graph at {}: the directory holds no {}. \
-                 Claim something to create it",
+                 Run claimdag upsert --summary \"...\" to create it",
                 dir.display(),
                 crate::snap::SNAP_BIN
             ),
@@ -1461,7 +1469,9 @@ impl WorkGraph {
         forced: bool,
     ) -> Result<WorkId, String> {
         if !status.is_terminal() {
-            return Err("complete: status not terminal".into());
+            return Err(
+                "complete: status not terminal; expected done, failed, or cancelled".into(),
+            );
         }
         if id.is_zero() {
             return Err("complete: zero id".into());
@@ -1617,8 +1627,13 @@ impl WorkGraph {
     /// The graph in a directory, or why there is none: no directory, an
     /// unreadable snapshot, or an empty graph. Readers need the difference.
     pub fn open_dir(dir: &Path) -> Result<Self, Absent> {
-        if !dir.is_dir() {
-            return Err(Absent::NoDirectory(dir.to_path_buf()));
+        match std::fs::metadata(dir) {
+            Ok(meta) if !meta.is_dir() => return Err(Absent::NotDirectory(dir.to_path_buf())),
+            Ok(_) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                return Err(Absent::NoDirectory(dir.to_path_buf()));
+            }
+            Err(err) => return Err(Absent::Unreadable(dir.to_path_buf(), err.to_string())),
         }
         if !dir.join(crate::snap::SNAP_BIN).is_file() {
             return Err(Absent::NoSnapshot(dir.to_path_buf()));
@@ -2234,6 +2249,13 @@ mod tests {
                 .contains("nothing has been claimed"),
             "the message has to say what to do about it"
         );
+        assert!(
+            WorkGraph::open_dir(&missing)
+                .unwrap_err()
+                .to_string()
+                .contains("claimdag upsert"),
+            "the message has to name upsert as the creator"
+        );
         // A writer still starts cold there, which is the whole reason the two
         // views exist.
         assert!(WorkGraph::load_dir(&missing).list().is_empty());
@@ -2244,6 +2266,13 @@ mod tests {
             WorkGraph::open_dir(&empty),
             Err(Absent::NoSnapshot(ref at)) if *at == empty
         ));
+        assert!(
+            WorkGraph::open_dir(&empty)
+                .unwrap_err()
+                .to_string()
+                .contains("claimdag upsert"),
+            "the message has to name upsert as the creator"
+        );
 
         let broken = base.join("corrupt");
         std::fs::create_dir_all(&broken).unwrap();

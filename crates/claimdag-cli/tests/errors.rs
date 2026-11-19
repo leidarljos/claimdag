@@ -339,6 +339,12 @@ fn help_documents_the_exit_statuses() {
         "{flat}"
     );
     assert!(flat.contains("who holds it and the unix second"), "{flat}");
+    assert!(
+        flat.contains(
+            "Directory with work.bin (else CLAIMDAG_DIR, else $XDG_RUNTIME_DIR/claimdag, $XDG_STATE_HOME/claimdag, ~/.local/state/claimdag, /tmp/claimdag-UID, then /tmp/claimdag)"
+        ),
+        "{flat}"
+    );
 }
 
 #[test]
@@ -347,4 +353,172 @@ fn unreadable_arguments_exit_2() {
     assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
     let out = claimdag_bare(&["--not-a-flag"]);
     assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
+}
+
+#[test]
+fn help_subcommand_accepts_help_flag() {
+    let out = claimdag_bare(&["help", "--help"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("Usage: claimdag help [COMMAND]"),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}
+
+#[test]
+fn repeated_complete_prints_the_stored_terminal_status() {
+    let dir = tempfile::tempdir().unwrap();
+    let id = held(dir.path());
+    let first = claimdag(
+        dir.path(),
+        &["complete", &id, "--status", "done", "--actor", SEAT_A],
+    );
+    assert_eq!(first.status.code(), Some(0), "{}", stderr(&first));
+    assert_eq!(stdout(&first), format!("{id}  done"));
+
+    let again = claimdag(
+        dir.path(),
+        &["complete", &id, "--status", "failed", "--actor", SEAT_A],
+    );
+    assert_eq!(again.status.code(), Some(0), "{}", stderr(&again));
+    assert_eq!(stdout(&again), format!("{id}  done"));
+    assert_eq!(status_of(dir.path(), &id), "done");
+
+    let forced = claimdag(
+        dir.path(),
+        &["complete", &id, "--status", "cancelled", "--force"],
+    );
+    assert_eq!(forced.status.code(), Some(0), "{}", stderr(&forced));
+    assert_eq!(stdout(&forced), format!("{id}  done"));
+    let log = std::fs::read_to_string(dir.path().join("forced.log")).unwrap();
+    assert!(log.contains("done"), "{log}");
+    assert!(!log.contains("cancelled"), "{log}");
+}
+
+#[test]
+fn absent_graph_error_names_upsert_and_upsert_creates_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let missing = dir.path().join("fresh-seat");
+    let before = claimdag(&missing, &["list"]);
+    assert_eq!(before.status.code(), Some(1));
+    let msg = stderr(&before);
+    assert!(msg.contains("claimdag upsert"), "{msg}");
+    assert!(!msg.contains("claim something"), "{msg}");
+
+    let created = claimdag(&missing, &["upsert", "--summary", "first node"]);
+    assert_eq!(created.status.code(), Some(0), "{}", stderr(&created));
+
+    let after = claimdag(&missing, &["list"]);
+    assert_eq!(after.status.code(), Some(0), "{}", stderr(&after));
+    assert!(stdout(&after).contains("first node"), "{}", stdout(&after));
+}
+
+#[test]
+fn bad_enum_flags_list_valid_choices() {
+    let dir = tempfile::tempdir().unwrap();
+    let id = upsert(dir.path(), &["--summary", "target"]);
+
+    let bad_kind = claimdag(dir.path(), &["upsert", "--kind", "bogus", "--summary", "x"]);
+    assert_eq!(bad_kind.status.code(), Some(1));
+    assert!(
+        stderr(&bad_kind).contains("expected unset, goal, step, task, or molecule"),
+        "{}",
+        stderr(&bad_kind)
+    );
+
+    let bad_status = claimdag(
+        dir.path(),
+        &["upsert", "--status", "bogus", "--summary", "x"],
+    );
+    assert_eq!(bad_status.status.code(), Some(1));
+    assert!(
+        stderr(&bad_status).contains("expected todo, ready, blocked"),
+        "{}",
+        stderr(&bad_status)
+    );
+
+    let bad_role = claimdag(dir.path(), &["upsert", "--role", "bogus", "--summary", "x"]);
+    assert_eq!(bad_role.status.code(), Some(1));
+    assert!(
+        stderr(&bad_role).contains(
+            "expected unset, explore, architect, implementor, verifier, orchestrator, or general"
+        ),
+        "{}",
+        stderr(&bad_role)
+    );
+
+    let bad_ready_role = claimdag(dir.path(), &["ready", "--role", "bogus"]);
+    assert_eq!(bad_ready_role.status.code(), Some(1));
+    assert!(
+        stderr(&bad_ready_role).contains("expected unset, explore, architect"),
+        "{}",
+        stderr(&bad_ready_role)
+    );
+
+    let bad_complete = claimdag(dir.path(), &["complete", &id, "--status", "bogus"]);
+    assert_eq!(bad_complete.status.code(), Some(1));
+    assert!(
+        stderr(&bad_complete).contains("expected done, failed, or cancelled"),
+        "{}",
+        stderr(&bad_complete)
+    );
+
+    let nonterminal_complete = claimdag(dir.path(), &["complete", &id, "--status", "todo"]);
+    assert_eq!(nonterminal_complete.status.code(), Some(1));
+    assert!(
+        stderr(&nonterminal_complete).contains("expected done, failed, or cancelled"),
+        "{}",
+        stderr(&nonterminal_complete)
+    );
+}
+
+#[test]
+fn a_file_path_for_dir_is_reported_as_not_a_directory() {
+    let root = tempfile::tempdir().unwrap();
+    let file = root.path().join("not-a-dir");
+    std::fs::write(&file, b"x").unwrap();
+
+    let read = claimdag(&file, &["list"]);
+    assert_eq!(read.status.code(), Some(1), "{}", stderr(&read));
+    assert!(
+        stderr(&read).contains("the path is not a directory"),
+        "{}",
+        stderr(&read)
+    );
+
+    let write = claimdag(&file, &["upsert", "--summary", "first"]);
+    assert_eq!(write.status.code(), Some(1), "{}", stderr(&write));
+    assert!(
+        stderr(&write).contains(": not a directory"),
+        "{}",
+        stderr(&write)
+    );
+}
+
+#[test]
+fn complete_help_is_not_split_into_sentence_paragraphs() {
+    let out = claimdag_bare(&["complete", "--help"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !text.contains("\n\n--actor names who is finishing it."),
+        "{text}"
+    );
+    assert!(
+        !text.contains("\n\nWith none, the call still finishes the node."),
+        "{text}"
+    );
+}
+
+#[test]
+fn release_help_is_not_split_into_sentence_paragraphs() {
+    let out = claimdag_bare(&["release", "--help"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(!text.contains("\n\n--actor names the holder."), "{text}");
+    assert!(
+        !text.contains("\n\nWith none, the call still hands the claim back."),
+        "{text}"
+    );
 }

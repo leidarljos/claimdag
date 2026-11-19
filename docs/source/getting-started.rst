@@ -44,12 +44,16 @@ everything after carries.
 .. code:: console
 
    $ claimdag renew $a --actor $me
+   gen=2
    $ claimdag reclaim --lease 60
+   none
 
-``reclaim`` hands back every claim quiet for longer than the lease and moves
-its generation. A worker that stalled and wakes up later carries a stale
-token, and ``complete --gen 2`` is refused instead of finishing work that is
-now somebody else's.
+``renew`` resets the lease timer and keeps generation 2. Because the claim
+was renewed within 60 seconds, ``reclaim --lease 60`` prints ``none``. When a
+claim does sit quiet past the lease, ``reclaim`` hands it back and moves
+its generation so a stalled worker's ``complete --gen 2`` is refused
+instead of finishing work that is now somebody else's (see
+:doc:`Fence a completion <howto-lease>` for an example with ``--lease 0``).
 
 4. Finish, and see what opened
 ==============================

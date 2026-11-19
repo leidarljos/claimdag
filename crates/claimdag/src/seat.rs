@@ -187,8 +187,9 @@ impl Located {
             self.dir().display(),
             names.join(", ")
         );
-        // A graph directory that does not exist yet keeps nothing, and the
-        // next call says it again.
+        // A graph directory that does not exist yet cannot keep the marker
+        // unless it is made first.
+        let _ = std::fs::create_dir_all(self.dir());
         let _ = std::fs::write(&told, list);
     }
 
@@ -312,7 +313,11 @@ fn locate_from(explicit: Option<PathBuf>, named: Option<OsString>, env: Fallback
         Place { dir, source, graph }
     };
     let mut places: Vec<Place> = Vec::new();
-    places.extend(explicit.map(|dir| place(dir, Source::Flag)));
+    places.extend(
+        explicit
+            .filter(|dir| !dir.as_os_str().is_empty())
+            .map(|dir| place(dir, Source::Flag)),
+    );
     places.extend(
         named
             .filter(|raw| !raw.is_empty())
@@ -380,6 +385,14 @@ mod tests {
     fn an_empty_name_is_not_a_name() {
         assert_eq!(
             dir_from(None, Some(OsString::new()), env(Some("/run"), None, None)),
+            PathBuf::from("/run/claimdag")
+        );
+    }
+
+    #[test]
+    fn an_empty_flag_value_is_not_a_directory_name() {
+        assert_eq!(
+            dir_from(Some(PathBuf::new()), None, env(Some("/run"), None, None)),
             PathBuf::from("/run/claimdag")
         );
     }
@@ -536,6 +549,16 @@ mod tests {
             )
         );
         assert_eq!(located.move_graph(), Ok(None));
+    }
+
+    #[test]
+    fn a_missing_runtime_directory_says_the_line_once() {
+        let host = Host::new("runtime-once");
+        host.graph("state");
+        let locate = || locate_from(None, None, host.env(true, euid()));
+        assert!(told(&locate()).contains("also holding work"));
+        assert_eq!(told(&locate()), "");
+        assert!(host.dir("runtime").is_dir());
     }
 
     /// A directory the caller named is used, and nothing is said about the

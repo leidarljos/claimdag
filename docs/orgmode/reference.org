@@ -54,9 +54,9 @@ Commands:
   claim       Compare-and-swap claim. Omit --gen to ignore generation
   ready       View ready nodes that can be taken now: unblocked and unfinished
   claim-next  Atomically claim the best available ready node with load-balanced selection
-  complete    Mark a node terminal (done, failed, or cancelled)
+  complete    Mark a node terminal (done, failed, or cancelled). Pass the --gen returned by claim to be refused if the lease was reclaimed while the work was in flight. Omitting it finishes the node whatever happened to the claim, which is the only way to speak for a node nobody holds. --actor names who is finishing it. With none, the call still finishes the node. It records a warning on stderr and in warn.log. The warning is allow, warn, and no-actor, separated by tabs. An actor who is not the holder is recorded the same way, with not-assignee. The call still finishes the node. --force finishes it for nobody and appends a line to forced.log instead of that warning
   renew       Say the holder is still working, moving the lease without changing hands
-  release     Hand one claim back on purpose: ready again, assignee cleared, generation moved
+  release     Hand one claim back on purpose: ready again, assignee cleared, generation moved. The way off a claim before the work is terminal. A holder that stops without this stays busy until the lease runs out and cannot claim anything else meanwhile. --actor names the holder. With none, the call still hands the claim back. It records a warning on stderr and in warn.log. The warning is allow, warn, and no-actor, separated by tabs. An actor who is not the holder is recorded the same way, with not-assignee. The call still hands the claim back. --force hands the claim back whoever holds it and appends a line to forced.log instead of that warning
   reopen      Bring a finished node back to ready, generation moved, so the same work can be taken again
   reclaim     Hand back every claim quiet for longer than the lease, in seconds
   link        Add a boolean hard dependency (parent before child)
@@ -67,7 +67,7 @@ Commands:
   help        Print this message or the help of the given subcommand(s)
 
 Options:
-      --dir <DIR>  Directory that holds work.bin (else CLAIMDAG_DIR, else the runtime dir, else the state dir)
+      --dir <DIR>  Directory with work.bin (else CLAIMDAG_DIR, else $XDG_RUNTIME_DIR/claimdag, $XDG_STATE_HOME/claimdag, ~/.local/state/claimdag, /tmp/claimdag-UID, then /tmp/claimdag)
   -h, --help       Print help
   -V, --version    Print version
 
@@ -91,7 +91,7 @@ Print one node by 32-hex id
 Usage: claimdag get <ID>
 
 Arguments:
-  <ID>
+  <ID>  32-hex node id
 
 Options:
   -h, --help  Print help
@@ -102,13 +102,13 @@ Create or update a node. Omit --id to mint
 Usage: claimdag upsert [OPTIONS]
 
 Options:
-      --id <ID>
-      --kind <KIND>        [default: task]
-      --status <STATUS>    Omit to keep the status an existing node already has. A new node starts at todo
-      --role <ROLE>        [default: unset]
+      --id <ID>            32-hex node id. Omit to mint a new node
+      --kind <KIND>        Node kind ('unset', 'goal', 'step', 'task', 'molecule'). Omit to keep an existing node's kind; a new node defaults to task
+      --status <STATUS>    Node status ('todo', 'ready', 'blocked'). Omit to keep the status an existing node already has; a new node starts at todo
+      --role <ROLE>        Worker role ('unset', 'explore', 'architect', 'implementor', 'verifier', 'orchestrator', 'general') [default: unset]
       --parent <PARENT>    Parent work id (32 hex). Zero means unset [default: 00000000000000000000000000000000]
-      --summary <SUMMARY>  [default: ""]
-      --actor <ACTOR>      [default: 00000000000000000000000000000000]
+      --summary <SUMMARY>  Short text summary for the node [default: ""]
+      --actor <ACTOR>      Caller actor id (32 hex) [default: 00000000000000000000000000000000]
   -h, --help               Print help
 
 $ claimdag claim --help
@@ -117,11 +117,11 @@ Compare-and-swap claim. Omit --gen to ignore generation
 Usage: claimdag claim [OPTIONS] --assignee <ASSIGNEE> <ID>
 
 Arguments:
-  <ID>
+  <ID>  32-hex node id
 
 Options:
-      --assignee <ASSIGNEE>
-      --gen <GEN>
+      --assignee <ASSIGNEE>  Claiming worker id (32 hex)
+      --gen <GEN>            Expected generation from the node. Omit to ignore generation
   -h, --help                 Print help
 
 $ claimdag ready --help
@@ -130,7 +130,7 @@ View ready nodes that can be taken now: unblocked and unfinished
 Usage: claimdag ready [OPTIONS]
 
 Options:
-      --role <ROLE>          Filter or prioritize by role ('explore', 'architect', 'implementor', 'verifier', 'orchestrator', 'general') [default: unset]
+      --role <ROLE>          Filter or prioritize by role ('unset', 'explore', 'architect', 'implementor', 'verifier', 'orchestrator', 'general') [default: unset]
       --assignee <ASSIGNEE>  Requesting worker id (32 hex) for dispersed load balancing [default: 00000000000000000000000000000000]
       --slack <SLACK>        Critical depth slack for candidate dispersion [default: 1]
       --balanced             Order by balanced suitability and worker dispersion rather than static depth
@@ -144,55 +144,25 @@ Usage: claimdag claim-next [OPTIONS] --assignee <ASSIGNEE>
 
 Options:
       --assignee <ASSIGNEE>  Who is taking it, 32 hex characters
-      --role <ROLE>          Desired role affinity ('explore', 'architect', 'implementor', 'verifier', 'orchestrator', 'general') [default: unset]
+      --role <ROLE>          Desired role affinity ('unset', 'explore', 'architect', 'implementor', 'verifier', 'orchestrator', 'general') [default: unset]
       --slack <SLACK>        Allowed critical depth slack for candidate dispersion (default 1) [default: 1]
   -h, --help                 Print help
 
 $ claimdag complete --help
-Mark a node terminal (done, failed, or cancelled).
-
-Pass the --gen returned by claim to be refused if the lease was reclaimed while the work was in flight. Omitting it finishes the node whatever happened to the claim, which is the only way to speak for a node nobody holds.
-
---actor names who is finishing it.
-
-With none, the call still finishes the node.
-
-It records a warning on stderr and in warn.log.
-
-The warning is allow, warn, and no-actor, separated by tabs.
-
-An actor who is not the holder is recorded the same way, with not-assignee.
-
-The call still finishes the node.
-
---force finishes it for nobody.
-
-It appends a line to forced.log instead of that warning.
+Mark a node terminal (done, failed, or cancelled). Pass the --gen returned by claim to be refused if the lease was reclaimed while the work was in flight. Omitting it finishes the node whatever happened to the claim, which is the only way to speak for a node nobody holds. --actor names who is finishing it. With none, the call still finishes the node. It records a warning on stderr and in warn.log. The warning is allow, warn, and no-actor, separated by tabs. An actor who is not the holder is recorded the same way, with not-assignee. The call still finishes the node. --force finishes it for nobody and appends a line to forced.log instead of that warning
 
 Usage: claimdag complete [OPTIONS] <ID>
 
 Arguments:
-  <ID>
-
+  <ID>  32-hex node id
 
 Options:
-      --status <STATUS>
-          [default: done]
-
-      --summary <SUMMARY>
-          [default: ""]
-
-      --actor <ACTOR>
-
-
-      --force
-          Finish it with no actor, whoever holds it. Logged to forced.log
-
-      --gen <GEN>
-
-
-  -h, --help
-          Print help (see a summary with '-h')
+      --status <STATUS>    Terminal status ('done', 'failed', 'cancelled') [default: done]
+      --summary <SUMMARY>  Updated summary text. Omit or pass empty to keep the existing summary [default: ""]
+      --actor <ACTOR>      Caller actor id (32 hex)
+      --force              Finish it with no actor, whoever holds it. Logged to forced.log
+      --gen <GEN>          Expected generation from claim. Omit to skip the check
+  -h, --help               Print help
 
 $ claimdag renew --help
 Say the holder is still working, moving the lease without changing hands
@@ -200,48 +170,24 @@ Say the holder is still working, moving the lease without changing hands
 Usage: claimdag renew [OPTIONS] <ID>
 
 Arguments:
-  <ID>
+  <ID>  32-hex node id
 
 Options:
-      --actor <ACTOR>  [default: 00000000000000000000000000000000]
+      --actor <ACTOR>  Caller actor id (32 hex) [default: 00000000000000000000000000000000]
   -h, --help           Print help
 
 $ claimdag release --help
-Hand one claim back on purpose: ready again, assignee cleared, generation moved.
-
-The way off a claim before the work is terminal. A holder that stops without this stays busy until the lease runs out, and cannot claim anything else meanwhile.
-
---actor names the holder.
-
-With none, the call still hands the claim back.
-
-It records a warning on stderr and in warn.log.
-
-The warning is allow, warn, and no-actor, separated by tabs.
-
-An actor who is not the holder is recorded the same way, with not-assignee.
-
-The call still hands the claim back.
-
---force hands the claim back whoever holds it.
-
-It appends a line to forced.log instead of that warning.
+Hand one claim back on purpose: ready again, assignee cleared, generation moved. The way off a claim before the work is terminal. A holder that stops without this stays busy until the lease runs out and cannot claim anything else meanwhile. --actor names the holder. With none, the call still hands the claim back. It records a warning on stderr and in warn.log. The warning is allow, warn, and no-actor, separated by tabs. An actor who is not the holder is recorded the same way, with not-assignee. The call still hands the claim back. --force hands the claim back whoever holds it and appends a line to forced.log instead of that warning
 
 Usage: claimdag release [OPTIONS] <ID>
 
 Arguments:
-  <ID>
-
+  <ID>  32-hex node id
 
 Options:
-      --actor <ACTOR>
-
-
-      --force
-          Hand it back with no actor, whoever holds it. Logged to forced.log
-
-  -h, --help
-          Print help (see a summary with '-h')
+      --actor <ACTOR>  Caller actor id (32 hex)
+      --force          Hand it back with no actor, whoever holds it. Logged to forced.log
+  -h, --help           Print help
 
 $ claimdag reopen --help
 Bring a finished node back to ready, generation moved, so the same work can be taken again
@@ -249,10 +195,10 @@ Bring a finished node back to ready, generation moved, so the same work can be t
 Usage: claimdag reopen [OPTIONS] <ID>
 
 Arguments:
-  <ID>
+  <ID>  32-hex node id
 
 Options:
-      --actor <ACTOR>  [default: 00000000000000000000000000000000]
+      --actor <ACTOR>  Caller actor id (32 hex) [default: 00000000000000000000000000000000]
   -h, --help           Print help
 
 $ claimdag reclaim --help
@@ -264,6 +210,8 @@ Usage: claimdag reclaim [OPTIONS]
 
 Options:
       --lease <LEASE>
+          Quiet threshold in seconds before a claim is returned
+
           [default: 900]
 
   -h, --help
@@ -275,11 +223,11 @@ Add a boolean hard dependency (parent before child)
 Usage: claimdag link [OPTIONS] <PARENT> <CHILD>
 
 Arguments:
-  <PARENT>
-  <CHILD>
+  <PARENT>  32-hex id of the dependency that must finish first
+  <CHILD>   32-hex id of the dependent node
 
 Options:
-      --actor <ACTOR>  [default: 00000000000000000000000000000000]
+      --actor <ACTOR>  Caller actor id (32 hex) [default: 00000000000000000000000000000000]
   -h, --help           Print help
 
 $ claimdag unlink --help
@@ -288,11 +236,11 @@ Drop a boolean hard dependency. Missing edge is ok
 Usage: claimdag unlink [OPTIONS] <PARENT> <CHILD>
 
 Arguments:
-  <PARENT>
-  <CHILD>
+  <PARENT>  32-hex id of the dependency
+  <CHILD>   32-hex id of the dependent node
 
 Options:
-      --actor <ACTOR>  [default: 00000000000000000000000000000000]
+      --actor <ACTOR>  Caller actor id (32 hex) [default: 00000000000000000000000000000000]
   -h, --help           Print help
 
 $ claimdag archive --help
@@ -301,10 +249,10 @@ Soft-hide a terminal node. Not a delete
 Usage: claimdag archive [OPTIONS] <ID>
 
 Arguments:
-  <ID>
+  <ID>  32-hex node id
 
 Options:
-      --actor <ACTOR>  [default: 00000000000000000000000000000000]
+      --actor <ACTOR>  Caller actor id (32 hex) [default: 00000000000000000000000000000000]
   -h, --help           Print help
 
 $ claimdag unarchive --help
@@ -313,10 +261,10 @@ Clear the archive flag. Status stays terminal
 Usage: claimdag unarchive [OPTIONS] <ID>
 
 Arguments:
-  <ID>
+  <ID>  32-hex node id
 
 Options:
-      --actor <ACTOR>  [default: 00000000000000000000000000000000]
+      --actor <ACTOR>  Caller actor id (32 hex) [default: 00000000000000000000000000000000]
   -h, --help           Print help
 
 $ claimdag where --help
@@ -343,7 +291,9 @@ It is a text block after the row.
 A default directory another user owns is opened the same way.
 The rule for that is =not-owner=.
 
-=claim= prints the new generation. =renew= moves the lease and keeps that
+=claim= prints the new generation. Omit =--gen= on =claim= or =complete=
+to ignore generation; =--gen 0= is refused as a mismatch because initial
+generation is 1. =renew= moves the lease and keeps that
 generation. =get= prints the node and its dependencies. =complete --status
 done= is refused while a dependency is unfinished. =reopen= brings a
 terminal node back to ready and moves the generation; no record of the

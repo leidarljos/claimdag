@@ -112,6 +112,9 @@ fn held(path: &Path) -> String {
 ///
 /// Fails when the directory cannot be made or its owner cannot be read.
 pub fn prepare(dir: &Path, default: bool, uid: u32) -> Result<Option<String>, String> {
+    if std::fs::metadata(dir).is_ok_and(|meta| !meta.is_dir()) {
+        return Err(format!("{}: not a directory", dir.display()));
+    }
     if !default {
         std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
         return Ok(None);
@@ -205,6 +208,20 @@ mod tests {
         assert!(dir.join("new").is_dir());
         drop(lock_dir(&dir).unwrap());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_file_path_is_refused_as_not_a_directory() {
+        let root = std::env::temp_dir().join(format!("claimdag-file-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let file = root.join("work.bin");
+        std::fs::write(&file, b"x").unwrap();
+        assert_eq!(
+            prepare(&file, false, unsafe { libc::geteuid() }).unwrap_err(),
+            format!("{}: not a directory", file.display())
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// A second lock waits for the first to drop.

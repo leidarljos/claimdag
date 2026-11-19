@@ -6,6 +6,36 @@ The :doc:`reference <reference>` is the current command line. The
 
 Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 
+0.9.1 (2026-11-18)
+==================
+
+### Fixes
+
+-  Absent-graph errors now point new users to ``claimdag upsert --summary "..."`` instead of telling them to claim something before any node exists.
+-  CLI ``--help`` and invalid ``--kind``, ``--role``, and ``--status`` errors now list the valid enum values and option descriptions.
+-  On an empty directory, ``claimdag-tui`` now shows a status hint to run ``claimdag upsert --summary "..."``, and pressing ``R`` no longer creates an empty ``work.bin``.
+-  The "also holding work" line is now said once even when ``$XDG_RUNTIME_DIR/claimdag`` does not exist yet.
+-  ``--dir`` now refuses regular files with a clear "not a directory" message on both read and write verbs.
+-  ``claimdag --dir ""`` now follows the same empty-value rule as ``CLAIMDAG_DIR=""``: the empty value is ignored and default location lookup is used.
+-  ``claimdag claim --gen 0`` is now refused as a generation mismatch, matching ``claimdag complete --gen 0`` and ``--help``.
+-  ``claimdag complete`` now prints and logs the node's actual stored terminal status instead of the requested status when called on a node that is already terminal.
+-  ``claimdag help --help`` now prints help text instead of failing with an unrecognized subcommand error.
+-  ``claimdag list`` and ``claimdag get`` now show the 8-hex id prefix when a node summary is empty.
+-  ``claimdag upsert --id <ID>`` now keeps the existing node's kind when ``--kind`` is omitted instead of overwriting it with ``task``.
+-  ``claimdag-mcp`` now reports a clear one-line message when stdin closes before ``initialize``.
+-  ``claimdag-mcp`` now supports ``--help``, ``--version``, and ``--dir <DIR>``, and exits 2 on unknown or incomplete flags instead of failing on stdin initialize.
+-  ``claimdag-tui`` now shows unreadable ``work.bin`` errors in the status line instead of showing an empty graph with no error.
+
+### Documentation
+
+-  The README now writes critical slack as plain text "(delta)" instead of raw LaTeX.
+-  ``--dir`` help text now names the full fallback order in both ``claimdag`` and ``claimdag-tui``, matching ``claimdag where``.
+-  ``README.md`` now uses a user-writable ``/tmp/demo-seat`` directory instead of ``/var/lib/seat``, and ``README.md`` and ``install.org`` include ``cargo install --locked --path`` commands for installing from a checkout.
+-  ``claimdag complete --help`` and ``claimdag release --help`` now render their long descriptions as compact paragraphs instead of one sentence per paragraph.
+-  ``getting-started.org`` now shows the ``gen=2`` and ``none`` outputs from ``renew`` and ``reclaim --lease 60`` and clarifies why ``complete --gen 2`` succeeds in the next step.
+
+.. _section-1:
+
 0.9.0 (2026-11-18)
 ==================
 
@@ -80,7 +110,7 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 -  claimdag-mcp builds on rmcp 3.9.0, which covers RUSTSEC-2026-0457, RUSTSEC-2026-0461 and RUSTSEC-2026-0462, so ``cargo deny check`` passes.
    The server returns ``ServerConfig``, the name rmcp 3.9.0 uses in place of the deprecated ``ServerInfo`` alias.
 
-.. _section-1:
+.. _section-2:
 
 0.8.0 (2026-10-20)
 ==================
@@ -123,7 +153,7 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
    0700 and refuses one another user owns, by name. A directory named by
    ``CLAIMDAG_DIR`` or ``--dir`` is used as given, whoever owns it.
 
-.. _section-2:
+.. _section-3:
 
 0.7.1 (2026-10-10)
 ==================
@@ -133,7 +163,7 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 -  The how-to says how several workers take work at once, and its list of
    tools names ``claimdag_ready_balanced`` and ``claimdag_claim_next``.
 
-.. _section-3:
+.. _section-4:
 
 0.7.0 (2026-10-09)
 ==================
@@ -144,7 +174,7 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
    passes it back. Omitting ``--gen`` skips the check, so a reclaimed node
    can still be finished.
 
-.. _section-4:
+.. _section-5:
 
 0.6.2 (2026-09-20)
 ==================
@@ -152,7 +182,7 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 -  The how-to names the tools the server serves; ``claimdag_complete`` is
    titled as what it does; the architecture page names the ratatui pane.
 
-.. _section-5:
+.. _section-6:
 
 0.6.0 (2026-09-12)
 ==================
@@ -161,7 +191,7 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
    back to ready with the generation moved, so a tracker id that maps to
    one node can be sat on again. The ledger keeps the earlier completion.
 
-.. _section-6:
+.. _section-7:
 
 0.5.0 (2026-09-12)
 ==================
@@ -171,7 +201,7 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
    generation moved. A holder that stops without it stays busy until the
    lease runs out.
 
-.. _section-7:
+.. _section-8:
 
 0.4.0 (2026-09-12)
 ==================
@@ -189,7 +219,7 @@ What a user gets:
    with one key.
 -  A documentation site at https://leidarljos.github.io/claimdag/.
 
-.. _section-8:
+.. _section-9:
 
 0.3.0
 =====
