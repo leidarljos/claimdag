@@ -30,7 +30,14 @@ $ cargo binstall claimdag-cli claimdag-mcp claimdag-tui
 ```
 
 `cargo binstall` fetches the prebuilt binaries from the GitHub release.
-`cargo install` takes the same names and builds from source.
+`cargo install --locked` takes the same crate names and builds from source.
+From a checkout of this repository, install onto `PATH` with:
+
+```console
+$ cargo install --locked --path crates/claimdag-cli
+$ cargo install --locked --path crates/claimdag-mcp
+$ cargo install --locked --path crates/claimdag-tui
+```
 
 ## First minute
 
@@ -46,15 +53,15 @@ $ claimdag list
 
 ```console
 $ me=$(printf '%032x' 7)
-$ a=$(claimdag --dir /var/lib/seat upsert --summary "land the adapter")
-$ b=$(claimdag --dir /var/lib/seat upsert --summary "write the tree")
-$ claimdag --dir /var/lib/seat link $a $b
-$ claimdag --dir /var/lib/seat list
-$ claimdag --dir /var/lib/seat list --json --all
-$ claimdag --dir /var/lib/seat claim $a --assignee $me
-$ claimdag --dir /var/lib/seat release $a --actor $me
-$ claimdag --dir /var/lib/seat complete $a --actor $me
-$ claimdag --dir /var/lib/seat archive $a
+$ a=$(claimdag --dir /tmp/demo-seat upsert --summary "land the adapter")
+$ b=$(claimdag --dir /tmp/demo-seat upsert --summary "write the tree")
+$ claimdag --dir /tmp/demo-seat link $a $b
+$ claimdag --dir /tmp/demo-seat list
+$ claimdag --dir /tmp/demo-seat list --json --all
+$ claimdag --dir /tmp/demo-seat claim $a --assignee $me
+$ claimdag --dir /tmp/demo-seat release $a --actor $me
+$ claimdag --dir /tmp/demo-seat complete $a --actor $me
+$ claimdag --dir /tmp/demo-seat archive $a
 ```
 
 ## Law
@@ -89,7 +96,7 @@ A call that records a warning on the command line records it in the pane too.
 Bindings, the actor id and the handle names are in the [how-to](https://leidarljos.github.io/claimdag/howto.html).
 
 ```console
-$ CLAIMDAG_DIR=/var/lib/seat claimdag-tui
+$ CLAIMDAG_DIR=/tmp/demo-seat claimdag-tui
 ```
 
 Docs: [docs/orgmode/architecture.org](docs/orgmode/architecture.org).

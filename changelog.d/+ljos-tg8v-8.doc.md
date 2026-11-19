@@ -1,0 +1,1 @@
+`README.md` now uses a user-writable `/tmp/demo-seat` directory instead of `/var/lib/seat`, and `README.md` and `install.org` include `cargo install --locked --path` commands for installing from a checkout.

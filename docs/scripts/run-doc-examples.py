@@ -36,10 +36,11 @@ PAGES = (
     ROOT / "docs" / "orgmode" / "explanation.org",
 )
 
-# The directories the two pages name. CI has no /var/lib/seat, and
-# /tmp/demo-claims would be shared with whatever else is on the machine.
-# Both become the scratch directory this run created.
-DOC_DIRS = ("/tmp/demo-claims", "/var/lib/seat")
+# The directories the pages name. /tmp/demo-claims and /tmp/demo-seat
+# would be shared with whatever else is on the machine, so both become the
+# scratch directory this run created.
+DOC_DIRS = ("/tmp/demo-claims", "/tmp/demo-seat", "/var/lib/seat")
+INTRO_PAGES = {ROOT / "README.md", ROOT / "docs" / "orgmode" / "getting-started.org"}
 
 # Eight hex digits is how these pages abbreviate an id. The program prints
 # 32, which is the width of a WorkId. A shorter or longer abbreviation is
@@ -235,6 +236,10 @@ def run_page(page: pathlib.Path, env: dict[str, str]) -> list[str]:
     if not ran:
         return [f"{page}: no commands ran"]
     for step in ran:
+        if page in INTRO_PAGES and "/var/lib/seat" in step.command:
+            problems.append(
+                f"{page.name}: non-writable /var/lib/seat in intro example: {step.command}"
+            )
         for directory in DOC_DIRS:
             if directory in step.run:
                 problems.append(f"{page.name}: {directory} still in: {step.command}")

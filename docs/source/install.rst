@@ -68,8 +68,16 @@ repository root:
    $ cargo build --locked --release -p claimdag-cli -p claimdag-mcp -p claimdag-tui
 
 The binaries are ``target/release/claimdag``, ``target/release/claimdag-mcp``
-and ``target/release/claimdag-tui``. The check workflow builds and tests
-this workspace with rustc 1.97.1.
+and ``target/release/claimdag-tui``. To install them onto ``PATH`` from the
+repository root:
+
+.. code:: console
+
+   $ cargo install --locked --path crates/claimdag-cli
+   $ cargo install --locked --path crates/claimdag-mcp
+   $ cargo install --locked --path crates/claimdag-tui
+
+The check workflow builds and tests this workspace with rustc 1.97.1.
 
 A library user adds the crate:
 
