@@ -59,7 +59,8 @@ where
 }
 
 fn closed_before_initialize(err: &impl std::fmt::Display) -> bool {
-    err.to_string().contains("connection closed: initialize request")
+    err.to_string()
+        .contains("connection closed: initialize request")
 }
 
 #[tokio::main]

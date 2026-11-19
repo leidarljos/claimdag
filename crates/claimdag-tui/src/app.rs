@@ -105,9 +105,7 @@ impl App {
                 self.unreadable = false;
                 self.message = "no graph yet. run claimdag upsert --summary \"...\"".into();
             }
-            Err(
-                err @ (claimdag::Absent::Unreadable(_, _) | claimdag::Absent::NotDirectory(_)),
-            ) => {
+            Err(err @ (claimdag::Absent::Unreadable(_, _) | claimdag::Absent::NotDirectory(_))) => {
                 self.rows.clear();
                 self.unreadable = true;
                 self.message = err.to_string();
@@ -235,8 +233,8 @@ impl App {
                 self.reload();
                 return;
             }
-            Err(claimdag::Absent::NotDirectory(_) | claimdag::Absent::Unreadable(_, _))
-            | Ok(_) => {}
+            Err(claimdag::Absent::NotDirectory(_) | claimdag::Absent::Unreadable(_, _)) | Ok(_) => {
+            }
         }
         let lease = self.lease;
         self.message = match self.locked(|graph| Ok(graph.reclaim(lease).len())) {

@@ -144,11 +144,7 @@ fn list_and_get_show_the_id_prefix_when_summary_is_empty() {
 
     let listed = claimdag(dir.path(), &["list"]);
     assert_eq!(listed.status.code(), Some(0), "{}", stderr(&listed));
-    assert!(
-        stdout(&listed).contains(&id[..8]),
-        "{}",
-        stdout(&listed)
-    );
+    assert!(stdout(&listed).contains(&id[..8]), "{}", stdout(&listed));
 
     let line = get_line(dir.path(), &id);
     assert_eq!(summary_of(&line), &id[..8], "{line}");

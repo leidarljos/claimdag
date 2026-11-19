@@ -54,9 +54,9 @@ Commands:
   claim       Compare-and-swap claim. Omit --gen to ignore generation
   ready       View ready nodes that can be taken now: unblocked and unfinished
   claim-next  Atomically claim the best available ready node with load-balanced selection
-  complete    Mark a node terminal (done, failed, or cancelled)
+  complete    Mark a node terminal (done, failed, or cancelled). Pass the --gen returned by claim to be refused if the lease was reclaimed while the work was in flight. Omitting it finishes the node whatever happened to the claim, which is the only way to speak for a node nobody holds. --actor names who is finishing it. With none, the call still finishes the node. It records a warning on stderr and in warn.log. The warning is allow, warn, and no-actor, separated by tabs. An actor who is not the holder is recorded the same way, with not-assignee. The call still finishes the node. --force finishes it for nobody and appends a line to forced.log instead of that warning
   renew       Say the holder is still working, moving the lease without changing hands
-  release     Hand one claim back on purpose: ready again, assignee cleared, generation moved
+  release     Hand one claim back on purpose: ready again, assignee cleared, generation moved. The way off a claim before the work is terminal. A holder that stops without this stays busy until the lease runs out and cannot claim anything else meanwhile. --actor names the holder. With none, the call still hands the claim back. It records a warning on stderr and in warn.log. The warning is allow, warn, and no-actor, separated by tabs. An actor who is not the holder is recorded the same way, with not-assignee. The call still hands the claim back. --force hands the claim back whoever holds it and appends a line to forced.log instead of that warning
   reopen      Bring a finished node back to ready, generation moved, so the same work can be taken again
   reclaim     Hand back every claim quiet for longer than the lease, in seconds
   link        Add a boolean hard dependency (parent before child)
@@ -67,7 +67,7 @@ Commands:
   help        Print this message or the help of the given subcommand(s)
 
 Options:
-      --dir <DIR>  Directory that holds work.bin (else CLAIMDAG_DIR, else the runtime dir, else the state dir)
+      --dir <DIR>  Directory with work.bin (else CLAIMDAG_DIR, else $XDG_RUNTIME_DIR/claimdag, $XDG_STATE_HOME/claimdag, ~/.local/state/claimdag, /tmp/claimdag-UID, then /tmp/claimdag)
   -h, --help       Print help
   -V, --version    Print version
 
@@ -149,54 +149,20 @@ Options:
   -h, --help                 Print help
 
 $ claimdag complete --help
-Mark a node terminal (done, failed, or cancelled).
-
-Pass the --gen returned by claim to be refused if the lease was reclaimed while the work was in flight. Omitting it finishes the node whatever happened to the claim, which is the only way to speak for a node nobody holds.
-
---actor names who is finishing it.
-
-With none, the call still finishes the node.
-
-It records a warning on stderr and in warn.log.
-
-The warning is allow, warn, and no-actor, separated by tabs.
-
-An actor who is not the holder is recorded the same way, with not-assignee.
-
-The call still finishes the node.
-
---force finishes it for nobody.
-
-It appends a line to forced.log instead of that warning.
+Mark a node terminal (done, failed, or cancelled). Pass the --gen returned by claim to be refused if the lease was reclaimed while the work was in flight. Omitting it finishes the node whatever happened to the claim, which is the only way to speak for a node nobody holds. --actor names who is finishing it. With none, the call still finishes the node. It records a warning on stderr and in warn.log. The warning is allow, warn, and no-actor, separated by tabs. An actor who is not the holder is recorded the same way, with not-assignee. The call still finishes the node. --force finishes it for nobody and appends a line to forced.log instead of that warning
 
 Usage: claimdag complete [OPTIONS] <ID>
 
 Arguments:
-  <ID>
-          32-hex node id
+  <ID>  32-hex node id
 
 Options:
-      --status <STATUS>
-          Terminal status ('done', 'failed', 'cancelled')
-
-          [default: done]
-
-      --summary <SUMMARY>
-          Updated summary text. Omit or pass empty to keep the existing summary
-
-          [default: ""]
-
-      --actor <ACTOR>
-          Caller actor id (32 hex)
-
-      --force
-          Finish it with no actor, whoever holds it. Logged to forced.log
-
-      --gen <GEN>
-          Expected generation from claim. Omit to skip the check
-
-  -h, --help
-          Print help (see a summary with '-h')
+      --status <STATUS>    Terminal status ('done', 'failed', 'cancelled') [default: done]
+      --summary <SUMMARY>  Updated summary text. Omit or pass empty to keep the existing summary [default: ""]
+      --actor <ACTOR>      Caller actor id (32 hex)
+      --force              Finish it with no actor, whoever holds it. Logged to forced.log
+      --gen <GEN>          Expected generation from claim. Omit to skip the check
+  -h, --help               Print help
 
 $ claimdag renew --help
 Say the holder is still working, moving the lease without changing hands
@@ -211,41 +177,17 @@ Options:
   -h, --help           Print help
 
 $ claimdag release --help
-Hand one claim back on purpose: ready again, assignee cleared, generation moved.
-
-The way off a claim before the work is terminal. A holder that stops without this stays busy until the lease runs out, and cannot claim anything else meanwhile.
-
---actor names the holder.
-
-With none, the call still hands the claim back.
-
-It records a warning on stderr and in warn.log.
-
-The warning is allow, warn, and no-actor, separated by tabs.
-
-An actor who is not the holder is recorded the same way, with not-assignee.
-
-The call still hands the claim back.
-
---force hands the claim back whoever holds it.
-
-It appends a line to forced.log instead of that warning.
+Hand one claim back on purpose: ready again, assignee cleared, generation moved. The way off a claim before the work is terminal. A holder that stops without this stays busy until the lease runs out and cannot claim anything else meanwhile. --actor names the holder. With none, the call still hands the claim back. It records a warning on stderr and in warn.log. The warning is allow, warn, and no-actor, separated by tabs. An actor who is not the holder is recorded the same way, with not-assignee. The call still hands the claim back. --force hands the claim back whoever holds it and appends a line to forced.log instead of that warning
 
 Usage: claimdag release [OPTIONS] <ID>
 
 Arguments:
-  <ID>
-          32-hex node id
+  <ID>  32-hex node id
 
 Options:
-      --actor <ACTOR>
-          Caller actor id (32 hex)
-
-      --force
-          Hand it back with no actor, whoever holds it. Logged to forced.log
-
-  -h, --help
-          Print help (see a summary with '-h')
+      --actor <ACTOR>  Caller actor id (32 hex)
+      --force          Hand it back with no actor, whoever holds it. Logged to forced.log
+  -h, --help           Print help
 
 $ claimdag reopen --help
 Bring a finished node back to ready, generation moved, so the same work can be taken again

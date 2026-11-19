@@ -516,10 +516,7 @@ fn release_help_is_not_split_into_sentence_paragraphs() {
     let out = claimdag_bare(&["release", "--help"]);
     assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
     let text = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        !text.contains("\n\n--actor names the holder."),
-        "{text}"
-    );
+    assert!(!text.contains("\n\n--actor names the holder."), "{text}");
     assert!(
         !text.contains("\n\nWith none, the call still hands the claim back."),
         "{text}"

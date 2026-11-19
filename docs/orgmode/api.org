@@ -51,6 +51,7 @@ Why a seat's work graph could not be read.
 Variants:
 
 - =NoDirectory=: No directory at all: this seat has never had a graph here.
+- =NotDirectory=: A path exists there, but it is not a directory.
 - =NoSnapshot=: A directory with no snapshot in it.
 - =Unreadable=: A snapshot that could not be parsed, and the reason given.
 
