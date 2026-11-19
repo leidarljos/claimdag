@@ -10,6 +10,33 @@ The [[file:reference.org][reference]] is the current command line. The
 
 Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 
+* 0.9.1 (2026-11-18)
+
+### Fixes
+
+- Absent-graph errors now point new users to =claimdag upsert --summary "..."= instead of telling them to claim something before any node exists.
+- CLI =--help= and invalid =--kind=, =--role=, and =--status= errors now list the valid enum values and option descriptions.
+- On an empty directory, =claimdag-tui= now shows a status hint to run =claimdag upsert --summary "..."=, and pressing =R= no longer creates an empty =work.bin=.
+- The "also holding work" line is now said once even when =$XDG_RUNTIME_DIR/claimdag= does not exist yet.
+- =--dir= now refuses regular files with a clear "not a directory" message on both read and write verbs.
+- =claimdag --dir ""= now follows the same empty-value rule as ~CLAIMDAG_DIR=""~: the empty value is ignored and default location lookup is used.
+- =claimdag claim --gen 0= is now refused as a generation mismatch, matching =claimdag complete --gen 0= and =--help=.
+- =claimdag complete= now prints and logs the node's actual stored terminal status instead of the requested status when called on a node that is already terminal.
+- =claimdag help --help= now prints help text instead of failing with an unrecognized subcommand error.
+- =claimdag list= and =claimdag get= now show the 8-hex id prefix when a node summary is empty.
+- =claimdag upsert --id <ID>= now keeps the existing node's kind when =--kind= is omitted instead of overwriting it with =task=.
+- =claimdag-mcp= now reports a clear one-line message when stdin closes before =initialize=.
+- =claimdag-mcp= now supports =--help=, =--version=, and =--dir <DIR>=, and exits 2 on unknown or incomplete flags instead of failing on stdin initialize.
+- =claimdag-tui= now shows unreadable =work.bin= errors in the status line instead of showing an empty graph with no error.
+
+### Documentation
+
+- The README now writes critical slack as plain text "(delta)" instead of raw LaTeX.
+- =--dir= help text now names the full fallback order in both =claimdag= and =claimdag-tui=, matching =claimdag where=.
+- =README.md= now uses a user-writable =/tmp/demo-seat= directory instead of =/var/lib/seat=, and =README.md= and =install.org= include =cargo install --locked --path= commands for installing from a checkout.
+- =claimdag complete --help= and =claimdag release --help= now render their long descriptions as compact paragraphs instead of one sentence per paragraph.
+- =getting-started.org= now shows the ~gen=2~ and =none= outputs from =renew= and =reclaim --lease 60= and clarifies why =complete --gen 2= succeeds in the next step.
+
 * 0.9.0 (2026-11-18)
 
 ### Features
