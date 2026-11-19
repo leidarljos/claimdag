@@ -112,27 +112,7 @@ enum Cmd {
         slack: usize,
     },
     /// Mark a node terminal (done, failed, or cancelled).
-    ///
-    /// Pass the --gen returned by claim to be refused if the lease was
-    /// reclaimed while the work was in flight. Omitting it finishes the node
-    /// whatever happened to the claim, which is the only way to speak for a
-    /// node nobody holds.
-    ///
-    /// --actor names who is finishing it.
-    ///
-    /// With none, the call still finishes the node.
-    ///
-    /// It records a warning on stderr and in warn.log.
-    ///
-    /// The warning is allow, warn, and no-actor, separated by tabs.
-    ///
-    /// An actor who is not the holder is recorded the same way, with not-assignee.
-    ///
-    /// The call still finishes the node.
-    ///
-    /// --force finishes it for nobody.
-    ///
-    /// It appends a line to forced.log instead of that warning.
+    /// Pass the --gen returned by claim to be refused if the lease was reclaimed while the work was in flight. Omitting it finishes the node whatever happened to the claim, which is the only way to speak for a node nobody holds. --actor names who is finishing it. With none, the call still finishes the node. It records a warning on stderr and in warn.log. The warning is allow, warn, and no-actor, separated by tabs. An actor who is not the holder is recorded the same way, with not-assignee. The call still finishes the node. --force finishes it for nobody and appends a line to forced.log instead of that warning.
     Complete {
         /// 32-hex node id.
         id: String,
@@ -161,26 +141,7 @@ enum Cmd {
         actor: String,
     },
     /// Hand one claim back on purpose: ready again, assignee cleared, generation moved.
-    ///
-    /// The way off a claim before the work is terminal. A holder that stops
-    /// without this stays busy until the lease runs out, and cannot claim
-    /// anything else meanwhile.
-    ///
-    /// --actor names the holder.
-    ///
-    /// With none, the call still hands the claim back.
-    ///
-    /// It records a warning on stderr and in warn.log.
-    ///
-    /// The warning is allow, warn, and no-actor, separated by tabs.
-    ///
-    /// An actor who is not the holder is recorded the same way, with not-assignee.
-    ///
-    /// The call still hands the claim back.
-    ///
-    /// --force hands the claim back whoever holds it.
-    ///
-    /// It appends a line to forced.log instead of that warning.
+    /// The way off a claim before the work is terminal. A holder that stops without this stays busy until the lease runs out and cannot claim anything else meanwhile. --actor names the holder. With none, the call still hands the claim back. It records a warning on stderr and in warn.log. The warning is allow, warn, and no-actor, separated by tabs. An actor who is not the holder is recorded the same way, with not-assignee. The call still hands the claim back. --force hands the claim back whoever holds it and appends a line to forced.log instead of that warning.
     Release {
         /// 32-hex node id.
         id: String,
