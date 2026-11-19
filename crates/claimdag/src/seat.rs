@@ -187,8 +187,9 @@ impl Located {
             self.dir().display(),
             names.join(", ")
         );
-        // A graph directory that does not exist yet keeps nothing, and the
-        // next call says it again.
+        // A graph directory that does not exist yet cannot keep the marker
+        // unless it is made first.
+        let _ = std::fs::create_dir_all(self.dir());
         let _ = std::fs::write(&told, list);
     }
 
@@ -548,6 +549,16 @@ mod tests {
             )
         );
         assert_eq!(located.move_graph(), Ok(None));
+    }
+
+    #[test]
+    fn a_missing_runtime_directory_says_the_line_once() {
+        let host = Host::new("runtime-once");
+        host.graph("state");
+        let locate = || locate_from(None, None, host.env(true, euid()));
+        assert!(told(&locate()).contains("also holding work"));
+        assert_eq!(told(&locate()), "");
+        assert!(host.dir("runtime").is_dir());
     }
 
     /// A directory the caller named is used, and nothing is said about the
