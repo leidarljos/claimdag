@@ -396,3 +396,62 @@ fn absent_graph_error_names_upsert_and_upsert_creates_it() {
     assert_eq!(after.status.code(), Some(0), "{}", stderr(&after));
     assert!(stdout(&after).contains("first node"), "{}", stdout(&after));
 }
+
+#[test]
+fn bad_enum_flags_list_valid_choices() {
+    let dir = tempfile::tempdir().unwrap();
+    let id = upsert(dir.path(), &["--summary", "target"]);
+
+    let bad_kind = claimdag(dir.path(), &["upsert", "--kind", "bogus", "--summary", "x"]);
+    assert_eq!(bad_kind.status.code(), Some(1));
+    assert!(
+        stderr(&bad_kind).contains("expected unset, goal, step, task, or molecule"),
+        "{}",
+        stderr(&bad_kind)
+    );
+
+    let bad_status = claimdag(
+        dir.path(),
+        &["upsert", "--status", "bogus", "--summary", "x"],
+    );
+    assert_eq!(bad_status.status.code(), Some(1));
+    assert!(
+        stderr(&bad_status).contains("expected todo, ready, blocked"),
+        "{}",
+        stderr(&bad_status)
+    );
+
+    let bad_role = claimdag(dir.path(), &["upsert", "--role", "bogus", "--summary", "x"]);
+    assert_eq!(bad_role.status.code(), Some(1));
+    assert!(
+        stderr(&bad_role).contains(
+            "expected unset, explore, architect, implementor, verifier, orchestrator, or general"
+        ),
+        "{}",
+        stderr(&bad_role)
+    );
+
+    let bad_ready_role = claimdag(dir.path(), &["ready", "--role", "bogus"]);
+    assert_eq!(bad_ready_role.status.code(), Some(1));
+    assert!(
+        stderr(&bad_ready_role).contains("expected unset, explore, architect"),
+        "{}",
+        stderr(&bad_ready_role)
+    );
+
+    let bad_complete = claimdag(dir.path(), &["complete", &id, "--status", "bogus"]);
+    assert_eq!(bad_complete.status.code(), Some(1));
+    assert!(
+        stderr(&bad_complete).contains("expected done, failed, or cancelled"),
+        "{}",
+        stderr(&bad_complete)
+    );
+
+    let nonterminal_complete = claimdag(dir.path(), &["complete", &id, "--status", "todo"]);
+    assert_eq!(nonterminal_complete.status.code(), Some(1));
+    assert!(
+        stderr(&nonterminal_complete).contains("expected done, failed, or cancelled"),
+        "{}",
+        stderr(&nonterminal_complete)
+    );
+}

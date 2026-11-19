@@ -91,7 +91,7 @@ Print one node by 32-hex id
 Usage: claimdag get <ID>
 
 Arguments:
-  <ID>
+  <ID>  32-hex node id
 
 Options:
   -h, --help  Print help
@@ -102,13 +102,13 @@ Create or update a node. Omit --id to mint
 Usage: claimdag upsert [OPTIONS]
 
 Options:
-      --id <ID>
-      --kind <KIND>        Omit to keep the kind an existing node already has. A new node defaults to task
-      --status <STATUS>    Omit to keep the status an existing node already has. A new node starts at todo
-      --role <ROLE>        [default: unset]
+      --id <ID>            32-hex node id. Omit to mint a new node
+      --kind <KIND>        Node kind ('unset', 'goal', 'step', 'task', 'molecule'). Omit to keep an existing node's kind; a new node defaults to task
+      --status <STATUS>    Node status ('todo', 'ready', 'blocked'). Omit to keep the status an existing node already has; a new node starts at todo
+      --role <ROLE>        Worker role ('unset', 'explore', 'architect', 'implementor', 'verifier', 'orchestrator', 'general') [default: unset]
       --parent <PARENT>    Parent work id (32 hex). Zero means unset [default: 00000000000000000000000000000000]
-      --summary <SUMMARY>  [default: ""]
-      --actor <ACTOR>      [default: 00000000000000000000000000000000]
+      --summary <SUMMARY>  Short text summary for the node [default: ""]
+      --actor <ACTOR>      Caller actor id (32 hex) [default: 00000000000000000000000000000000]
   -h, --help               Print help
 
 $ claimdag claim --help
@@ -117,11 +117,11 @@ Compare-and-swap claim. Omit --gen to ignore generation
 Usage: claimdag claim [OPTIONS] --assignee <ASSIGNEE> <ID>
 
 Arguments:
-  <ID>
+  <ID>  32-hex node id
 
 Options:
-      --assignee <ASSIGNEE>
-      --gen <GEN>
+      --assignee <ASSIGNEE>  Claiming worker id (32 hex)
+      --gen <GEN>            Expected generation from the node. Omit to ignore generation
   -h, --help                 Print help
 
 $ claimdag ready --help
@@ -130,7 +130,7 @@ View ready nodes that can be taken now: unblocked and unfinished
 Usage: claimdag ready [OPTIONS]
 
 Options:
-      --role <ROLE>          Filter or prioritize by role ('explore', 'architect', 'implementor', 'verifier', 'orchestrator', 'general') [default: unset]
+      --role <ROLE>          Filter or prioritize by role ('unset', 'explore', 'architect', 'implementor', 'verifier', 'orchestrator', 'general') [default: unset]
       --assignee <ASSIGNEE>  Requesting worker id (32 hex) for dispersed load balancing [default: 00000000000000000000000000000000]
       --slack <SLACK>        Critical depth slack for candidate dispersion [default: 1]
       --balanced             Order by balanced suitability and worker dispersion rather than static depth
@@ -144,7 +144,7 @@ Usage: claimdag claim-next [OPTIONS] --assignee <ASSIGNEE>
 
 Options:
       --assignee <ASSIGNEE>  Who is taking it, 32 hex characters
-      --role <ROLE>          Desired role affinity ('explore', 'architect', 'implementor', 'verifier', 'orchestrator', 'general') [default: unset]
+      --role <ROLE>          Desired role affinity ('unset', 'explore', 'architect', 'implementor', 'verifier', 'orchestrator', 'general') [default: unset]
       --slack <SLACK>        Allowed critical depth slack for candidate dispersion (default 1) [default: 1]
   -h, --help                 Print help
 
@@ -173,23 +173,27 @@ Usage: claimdag complete [OPTIONS] <ID>
 
 Arguments:
   <ID>
-
+          32-hex node id
 
 Options:
       --status <STATUS>
+          Terminal status ('done', 'failed', 'cancelled')
+
           [default: done]
 
       --summary <SUMMARY>
+          Updated summary text. Omit or pass empty to keep the existing summary
+
           [default: ""]
 
       --actor <ACTOR>
-
+          Caller actor id (32 hex)
 
       --force
           Finish it with no actor, whoever holds it. Logged to forced.log
 
       --gen <GEN>
-
+          Expected generation from claim. Omit to skip the check
 
   -h, --help
           Print help (see a summary with '-h')
@@ -200,10 +204,10 @@ Say the holder is still working, moving the lease without changing hands
 Usage: claimdag renew [OPTIONS] <ID>
 
 Arguments:
-  <ID>
+  <ID>  32-hex node id
 
 Options:
-      --actor <ACTOR>  [default: 00000000000000000000000000000000]
+      --actor <ACTOR>  Caller actor id (32 hex) [default: 00000000000000000000000000000000]
   -h, --help           Print help
 
 $ claimdag release --help
@@ -231,11 +235,11 @@ Usage: claimdag release [OPTIONS] <ID>
 
 Arguments:
   <ID>
-
+          32-hex node id
 
 Options:
       --actor <ACTOR>
-
+          Caller actor id (32 hex)
 
       --force
           Hand it back with no actor, whoever holds it. Logged to forced.log
@@ -249,10 +253,10 @@ Bring a finished node back to ready, generation moved, so the same work can be t
 Usage: claimdag reopen [OPTIONS] <ID>
 
 Arguments:
-  <ID>
+  <ID>  32-hex node id
 
 Options:
-      --actor <ACTOR>  [default: 00000000000000000000000000000000]
+      --actor <ACTOR>  Caller actor id (32 hex) [default: 00000000000000000000000000000000]
   -h, --help           Print help
 
 $ claimdag reclaim --help
@@ -264,6 +268,8 @@ Usage: claimdag reclaim [OPTIONS]
 
 Options:
       --lease <LEASE>
+          Quiet threshold in seconds before a claim is returned
+
           [default: 900]
 
   -h, --help
@@ -275,11 +281,11 @@ Add a boolean hard dependency (parent before child)
 Usage: claimdag link [OPTIONS] <PARENT> <CHILD>
 
 Arguments:
-  <PARENT>
-  <CHILD>
+  <PARENT>  32-hex id of the dependency that must finish first
+  <CHILD>   32-hex id of the dependent node
 
 Options:
-      --actor <ACTOR>  [default: 00000000000000000000000000000000]
+      --actor <ACTOR>  Caller actor id (32 hex) [default: 00000000000000000000000000000000]
   -h, --help           Print help
 
 $ claimdag unlink --help
@@ -288,11 +294,11 @@ Drop a boolean hard dependency. Missing edge is ok
 Usage: claimdag unlink [OPTIONS] <PARENT> <CHILD>
 
 Arguments:
-  <PARENT>
-  <CHILD>
+  <PARENT>  32-hex id of the dependency
+  <CHILD>   32-hex id of the dependent node
 
 Options:
-      --actor <ACTOR>  [default: 00000000000000000000000000000000]
+      --actor <ACTOR>  Caller actor id (32 hex) [default: 00000000000000000000000000000000]
   -h, --help           Print help
 
 $ claimdag archive --help
@@ -301,10 +307,10 @@ Soft-hide a terminal node. Not a delete
 Usage: claimdag archive [OPTIONS] <ID>
 
 Arguments:
-  <ID>
+  <ID>  32-hex node id
 
 Options:
-      --actor <ACTOR>  [default: 00000000000000000000000000000000]
+      --actor <ACTOR>  Caller actor id (32 hex) [default: 00000000000000000000000000000000]
   -h, --help           Print help
 
 $ claimdag unarchive --help
@@ -313,10 +319,10 @@ Clear the archive flag. Status stays terminal
 Usage: claimdag unarchive [OPTIONS] <ID>
 
 Arguments:
-  <ID>
+  <ID>  32-hex node id
 
 Options:
-      --actor <ACTOR>  [default: 00000000000000000000000000000000]
+      --actor <ACTOR>  Caller actor id (32 hex) [default: 00000000000000000000000000000000]
   -h, --help           Print help
 
 $ claimdag where --help

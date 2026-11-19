@@ -39,38 +39,48 @@ enum Cmd {
         json: bool,
     },
     /// Print one node by 32-hex id.
-    Get { id: String },
+    Get {
+        /// 32-hex node id.
+        id: String,
+    },
     /// Create or update a node. Omit --id to mint.
     Upsert {
+        /// 32-hex node id. Omit to mint a new node.
         #[arg(long)]
         id: Option<String>,
-        /// Omit to keep the kind an existing node already has. A new node defaults to task.
+        /// Node kind ('unset', 'goal', 'step', 'task', 'molecule'). Omit to keep an existing node's kind; a new node defaults to task.
         #[arg(long)]
         kind: Option<String>,
-        /// Omit to keep the status an existing node already has. A new node starts at todo.
+        /// Node status ('todo', 'ready', 'blocked'). Omit to keep the status an existing node already has; a new node starts at todo.
         #[arg(long)]
         status: Option<String>,
+        /// Worker role ('unset', 'explore', 'architect', 'implementor', 'verifier', 'orchestrator', 'general').
         #[arg(long, default_value = "unset")]
         role: String,
         /// Parent work id (32 hex). Zero means unset.
         #[arg(long, default_value = "00000000000000000000000000000000")]
         parent: String,
+        /// Short text summary for the node.
         #[arg(long, default_value = "")]
         summary: String,
+        /// Caller actor id (32 hex).
         #[arg(long, default_value = "00000000000000000000000000000000")]
         actor: String,
     },
     /// Compare-and-swap claim. Omit --gen to ignore generation.
     Claim {
+        /// 32-hex node id.
         id: String,
+        /// Claiming worker id (32 hex).
         #[arg(long)]
         assignee: String,
+        /// Expected generation from the node. Omit to ignore generation.
         #[arg(long)]
         gen: Option<u64>,
     },
     /// View ready nodes that can be taken now: unblocked and unfinished.
     Ready {
-        /// Filter or prioritize by role ('explore', 'architect', 'implementor', 'verifier', 'orchestrator', 'general').
+        /// Filter or prioritize by role ('unset', 'explore', 'architect', 'implementor', 'verifier', 'orchestrator', 'general').
         #[arg(long, default_value = "unset")]
         role: String,
         /// Requesting worker id (32 hex) for dispersed load balancing.
@@ -91,7 +101,7 @@ enum Cmd {
         /// Who is taking it, 32 hex characters.
         #[arg(long)]
         assignee: String,
-        /// Desired role affinity ('explore', 'architect', 'implementor', 'verifier', 'orchestrator', 'general').
+        /// Desired role affinity ('unset', 'explore', 'architect', 'implementor', 'verifier', 'orchestrator', 'general').
         #[arg(long, default_value = "unset")]
         role: String,
         /// Allowed critical depth slack for candidate dispersion (default 1).
@@ -121,22 +131,29 @@ enum Cmd {
     ///
     /// It appends a line to forced.log instead of that warning.
     Complete {
+        /// 32-hex node id.
         id: String,
+        /// Terminal status ('done', 'failed', 'cancelled').
         #[arg(long, default_value = "done")]
         status: String,
+        /// Updated summary text. Omit or pass empty to keep the existing summary.
         #[arg(long, default_value = "")]
         summary: String,
+        /// Caller actor id (32 hex).
         #[arg(long)]
         actor: Option<String>,
         /// Finish it with no actor, whoever holds it. Logged to forced.log.
         #[arg(long, conflicts_with = "actor")]
         force: bool,
+        /// Expected generation from claim. Omit to skip the check.
         #[arg(long)]
         gen: Option<u64>,
     },
     /// Say the holder is still working, moving the lease without changing hands.
     Renew {
+        /// 32-hex node id.
         id: String,
+        /// Caller actor id (32 hex).
         #[arg(long, default_value = "00000000000000000000000000000000")]
         actor: String,
     },
@@ -162,7 +179,9 @@ enum Cmd {
     ///
     /// It appends a line to forced.log instead of that warning.
     Release {
+        /// 32-hex node id.
         id: String,
+        /// Caller actor id (32 hex).
         #[arg(long)]
         actor: Option<String>,
         /// Hand it back with no actor, whoever holds it. Logged to forced.log.
@@ -171,7 +190,9 @@ enum Cmd {
     },
     /// Bring a finished node back to ready, generation moved, so the same work can be taken again.
     Reopen {
+        /// 32-hex node id.
         id: String,
+        /// Caller actor id (32 hex).
         #[arg(long, default_value = "00000000000000000000000000000000")]
         actor: String,
     },
@@ -180,32 +201,43 @@ enum Cmd {
     /// A claim with no expiry is a claim a crashed worker keeps, and the
     /// holder's identity stays busy with it. This is what returns both.
     Reclaim {
+        /// Quiet threshold in seconds before a claim is returned.
         #[arg(long, default_value_t = claimdag::DEFAULT_LEASE_SECS)]
         lease: u64,
     },
     /// Add a boolean hard dependency (parent before child).
     Link {
+        /// 32-hex id of the dependency that must finish first.
         parent: String,
+        /// 32-hex id of the dependent node.
         child: String,
+        /// Caller actor id (32 hex).
         #[arg(long, default_value = "00000000000000000000000000000000")]
         actor: String,
     },
     /// Drop a boolean hard dependency. Missing edge is ok.
     Unlink {
+        /// 32-hex id of the dependency.
         parent: String,
+        /// 32-hex id of the dependent node.
         child: String,
+        /// Caller actor id (32 hex).
         #[arg(long, default_value = "00000000000000000000000000000000")]
         actor: String,
     },
     /// Soft-hide a terminal node. Not a delete.
     Archive {
+        /// 32-hex node id.
         id: String,
+        /// Caller actor id (32 hex).
         #[arg(long, default_value = "00000000000000000000000000000000")]
         actor: String,
     },
     /// Clear the archive flag. Status stays terminal.
     Unarchive {
+        /// 32-hex node id.
         id: String,
+        /// Caller actor id (32 hex).
         #[arg(long, default_value = "00000000000000000000000000000000")]
         actor: String,
     },
@@ -223,6 +255,32 @@ enum Cmd {
 /// Characters in a work id. `WorkId` is two `u64`s, printed as 16 hex
 /// characters each, and `WorkId::from_hex` accepts that width only.
 const ID_HEX_CHARS: usize = 16 + 16;
+
+fn parse_kind(raw: &str) -> Result<WorkKind, String> {
+    WorkKind::parse_str(raw)
+        .ok_or_else(|| format!("bad kind {raw}: expected unset, goal, step, task, or molecule"))
+}
+
+fn parse_status(raw: &str) -> Result<WorkStatus, String> {
+    WorkStatus::parse_str(raw).ok_or_else(|| {
+        format!(
+            "bad status {raw}: expected todo, ready, blocked, claimed, running, done, failed, or cancelled"
+        )
+    })
+}
+
+fn parse_terminal_status(raw: &str) -> Result<WorkStatus, String> {
+    WorkStatus::parse_str(raw)
+        .ok_or_else(|| format!("bad status {raw}: expected done, failed, or cancelled"))
+}
+
+fn parse_role(raw: &str) -> Result<WorkRole, String> {
+    WorkRole::parse_str(raw).ok_or_else(|| {
+        format!(
+            "bad role {raw}: expected unset, explore, architect, implementor, verifier, orchestrator, or general"
+        )
+    })
+}
 
 fn parse_id(s: &str, g: &WorkGraph) -> Result<WorkId, String> {
     if let Some(id) = WorkId::from_hex(s) {
@@ -556,7 +614,7 @@ fn run() -> Result<(), String> {
             // An omitted --kind on an existing node keeps that node's kind.
             // A new node defaults to task, matching the MCP server.
             let kind = match kind {
-                Some(raw) => WorkKind::parse_str(&raw).ok_or_else(|| format!("bad kind {raw}"))?,
+                Some(raw) => parse_kind(&raw)?,
                 None if present.is_some() => WorkKind::Unset,
                 None => WorkKind::Task,
             };
@@ -565,12 +623,10 @@ fn run() -> Result<(), String> {
             // including an id the graph does not store yet, still starts at
             // todo. Readiness is derived from the dependencies after that.
             let status = match status {
-                Some(raw) => {
-                    WorkStatus::parse_str(&raw).ok_or_else(|| format!("bad status {raw}"))?
-                }
+                Some(raw) => parse_status(&raw)?,
                 None => present.map(|node| node.status).unwrap_or(WorkStatus::Todo),
             };
-            let role = WorkRole::parse_str(&role).ok_or_else(|| format!("bad role {role}"))?;
+            let role = parse_role(&role)?;
             let parent = parse_id(&parent, &g)?;
             let actor = parse_id(&actor, &g)?;
             let out = g.upsert(
@@ -605,7 +661,7 @@ fn run() -> Result<(), String> {
             balanced,
             json,
         } => {
-            let role = WorkRole::parse_str(&role).ok_or_else(|| format!("bad role {role}"))?;
+            let role = parse_role(&role)?;
             let assignee = parse_id(&assignee, &g)?;
             let nodes = if balanced || role != WorkRole::Unset || !assignee.is_zero() {
                 g.ready_view_balanced(role, assignee, slack)
@@ -623,7 +679,7 @@ fn run() -> Result<(), String> {
             slack,
         } => {
             let assignee = parse_id(&assignee, &g)?;
-            let role = WorkRole::parse_str(&role).ok_or_else(|| format!("bad role {role}"))?;
+            let role = parse_role(&role)?;
             let (id, cas) = g.claim_next(assignee, role, slack)?;
             g.save_dir(&dir)?;
             println!("{}  gen={cas}", id.to_hex());
@@ -636,8 +692,7 @@ fn run() -> Result<(), String> {
             force,
             gen,
         } => {
-            let status =
-                WorkStatus::parse_str(&status).ok_or_else(|| format!("bad status {status}"))?;
+            let status = parse_terminal_status(&status)?;
             let id = parse_id(&id, &g)?;
             if force {
                 let holder = g.complete_forced(id, status, &summary, gen)?;

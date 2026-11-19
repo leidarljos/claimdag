@@ -1461,7 +1461,9 @@ impl WorkGraph {
         forced: bool,
     ) -> Result<WorkId, String> {
         if !status.is_terminal() {
-            return Err("complete: status not terminal".into());
+            return Err(
+                "complete: status not terminal; expected done, failed, or cancelled".into(),
+            );
         }
         if id.is_zero() {
             return Err("complete: zero id".into());
