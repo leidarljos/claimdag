@@ -107,7 +107,9 @@ impl App {
                     self.unreadable = false;
                 }
             }
-            Err(err @ claimdag::Absent::Unreadable(_, _)) => {
+            Err(
+                err @ (claimdag::Absent::Unreadable(_, _) | claimdag::Absent::NotDirectory(_)),
+            ) => {
                 self.rows.clear();
                 self.unreadable = true;
                 self.message = err.to_string();

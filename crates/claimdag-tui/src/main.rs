@@ -13,7 +13,9 @@ use clap::Parser;
     about = "Terminal work graph over a claimdag work.bin"
 )]
 struct Cli {
-    /// Directory that holds work.bin (else CLAIMDAG_DIR, else the runtime dir, else the state dir).
+    /// Directory with work.bin (else CLAIMDAG_DIR, else
+    /// $XDG_RUNTIME_DIR/claimdag, $XDG_STATE_HOME/claimdag,
+    /// ~/.local/state/claimdag, /tmp/claimdag-UID, then /tmp/claimdag).
     #[arg(long)]
     dir: Option<PathBuf>,
     /// Print the parent tree as text and exit.

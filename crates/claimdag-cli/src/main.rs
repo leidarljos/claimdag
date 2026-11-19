@@ -15,7 +15,9 @@ use clap::{CommandFactory, Parser, Subcommand};
     after_help = "Exit status is 0 when the verb ran, 1 when it was refused, and 2 when the arguments could not be read. A refusal names the node, who holds it and the unix second that holder was last written when those apply, and the command that resolves it."
 )]
 struct Cli {
-    /// Directory that holds work.bin (else CLAIMDAG_DIR, else the runtime dir, else the state dir).
+    /// Directory with work.bin (else CLAIMDAG_DIR, else
+    /// $XDG_RUNTIME_DIR/claimdag, $XDG_STATE_HOME/claimdag,
+    /// ~/.local/state/claimdag, /tmp/claimdag-UID, then /tmp/claimdag).
     #[arg(long)]
     dir: Option<PathBuf>,
     #[command(subcommand)]

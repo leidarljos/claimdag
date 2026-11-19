@@ -73,6 +73,13 @@ fn stderr_text(out: &Output) -> String {
     String::from_utf8(out.stderr.clone()).expect("dump stderr is utf-8")
 }
 
+fn run_help() -> Output {
+    Command::new(env!("CARGO_BIN_EXE_claimdag-tui"))
+        .arg("--help")
+        .output()
+        .expect("run claimdag-tui --help")
+}
+
 /// A node with no open dependency is drawn `ready`, then two spaces, then
 /// its summary. That is the whole label when nobody holds it and it has no
 /// role and no dependency count.
@@ -261,4 +268,17 @@ fn a_node_whose_parent_was_pruned_dumps_as_a_root() {
     ]
     .concat();
     assert_golden(&run_dump(dir.path()), &expected);
+}
+
+#[test]
+fn help_lists_the_full_dir_fallback_order() {
+    let out = run_help();
+    assert!(out.status.success(), "{}", stderr_text(&out));
+    let text = stdout_text(&out);
+    assert!(
+        text.contains(
+            "Directory with work.bin (else CLAIMDAG_DIR, else $XDG_RUNTIME_DIR/claimdag, $XDG_STATE_HOME/claimdag, ~/.local/state/claimdag, /tmp/claimdag-UID, then /tmp/claimdag)"
+        ),
+        "{text}"
+    );
 }

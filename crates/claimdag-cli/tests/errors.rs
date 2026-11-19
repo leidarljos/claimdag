@@ -339,6 +339,12 @@ fn help_documents_the_exit_statuses() {
         "{flat}"
     );
     assert!(flat.contains("who holds it and the unix second"), "{flat}");
+    assert!(
+        flat.contains(
+            "Directory with work.bin (else CLAIMDAG_DIR, else $XDG_RUNTIME_DIR/claimdag, $XDG_STATE_HOME/claimdag, ~/.local/state/claimdag, /tmp/claimdag-UID, then /tmp/claimdag)"
+        ),
+        "{flat}"
+    );
 }
 
 #[test]
