@@ -334,6 +334,11 @@ fn print_list_line(n: &WorkNode) {
     } else {
         format!("  {}", n.role.as_str())
     };
+    let summary = if n.summary.trim().is_empty() {
+        n.id.to_hex()[..8].to_string()
+    } else {
+        n.summary.clone()
+    };
     println!(
         "{}  {}  {}{}{}  gen={}{}  {}",
         n.id.to_hex(),
@@ -343,7 +348,7 @@ fn print_list_line(n: &WorkNode) {
         role,
         n.cas_gen,
         flag,
-        n.summary
+        summary
     );
 }
 
@@ -427,6 +432,11 @@ fn print_get(n: &WorkNode) {
             .collect::<Vec<_>>()
             .join(" ")
     };
+    let summary = if n.summary.trim().is_empty() {
+        n.id.to_hex()[..8].to_string()
+    } else {
+        n.summary.clone()
+    };
     println!(
         "{}  {}  {}  {}  gen={}  assignee={}  parent={}  {}",
         n.id.to_hex(),
@@ -436,7 +446,7 @@ fn print_get(n: &WorkNode) {
         n.cas_gen,
         n.assignee.to_hex(),
         n.parent.to_hex(),
-        n.summary
+        summary
     );
     println!("deps  {deps}");
 }
