@@ -59,8 +59,8 @@ Commands:
   release     Hand one claim back on purpose: ready again, assignee cleared, generation moved. The way off a claim before the work is terminal. A holder that stops without this stays busy until the lease runs out and cannot claim anything else meanwhile. --actor names the holder. With none, the call still hands the claim back. It records a warning on stderr and in warn.log. The warning is allow, warn, and no-actor, separated by tabs. An actor who is not the holder is recorded the same way, with not-assignee. The call still hands the claim back. --force hands the claim back whoever holds it and appends a line to forced.log instead of that warning
   reopen      Bring a finished node back to ready, generation moved, so the same work can be taken again
   reclaim     Hand back every claim quiet for longer than the lease, in seconds
-  link        Add a boolean hard dependency (parent before child)
-  unlink      Drop a boolean hard dependency. Missing edge is ok
+  link        Record an edge (parent before child). hard, needs, pin and history block; advisory is recorded and does not
+  unlink      Drop an edge. Missing edge is ok
   archive     Soft-hide a terminal node. Not a delete
   unarchive   Clear the archive flag. Status stays terminal
   where       Print every location the graph can be in, in the order they are tried: the directory, whether it is in use, holds work or has no graph, and the rule that names it
@@ -71,7 +71,7 @@ Options:
   -h, --help       Print help
   -V, --version    Print version
 
-Exit status is 0 when the verb ran, 1 when it was refused, and 2 when the arguments could not be read. A refusal names the node, who holds it and the unix second that holder was last written when those apply, and the command that resolves it.
+Exit status is 0 when the verb ran, 1 when it was refused, 2 when the arguments could not be read, and 3 when a link would close a cycle. A refusal names the node, who holds it and the unix second that holder was last written when those apply, and the command that resolves it.
 
 $ claimdag list --help
 List nodes, newest first. Default is live work only
@@ -218,20 +218,21 @@ Options:
           Print help (see a summary with '-h')
 
 $ claimdag link --help
-Add a boolean hard dependency (parent before child)
+Record an edge (parent before child). hard, needs, pin and history block; advisory is recorded and does not
 
 Usage: claimdag link [OPTIONS] <PARENT> <CHILD>
 
 Arguments:
-  <PARENT>  32-hex id of the dependency that must finish first
+  <PARENT>  32-hex id of the dependency. A blocking kind waits until it is done
   <CHILD>   32-hex id of the dependent node
 
 Options:
+      --kind <KIND>    hard, needs, pin, history, or advisory [default: hard]
       --actor <ACTOR>  Caller actor id (32 hex) [default: 00000000000000000000000000000000]
   -h, --help           Print help
 
 $ claimdag unlink --help
-Drop a boolean hard dependency. Missing edge is ok
+Drop an edge. Missing edge is ok
 
 Usage: claimdag unlink [OPTIONS] <PARENT> <CHILD>
 

@@ -158,7 +158,22 @@ pub struct UpsertArgs {
     pub actor: String,
 }
 
-/// A dependency edge: the parent finishes before the child.
+/// A dependency edge from parent to child.
+#[derive(Deserialize, JsonSchema)]
+pub struct LinkArgs {
+    /// The node that has to finish first, 32 hex characters.
+    pub parent: String,
+    /// The node that waits, 32 hex characters.
+    pub child: String,
+    /// Who is asking, 32 hex characters.
+    pub actor: String,
+    /// `hard`, `needs`, `pin`, `history`, or `advisory`. Hard when omitted.
+    /// Advisory is recorded and does not block.
+    #[serde(default)]
+    pub kind: Option<String>,
+}
+
+/// A dependency edge to drop.
 #[derive(Deserialize, JsonSchema)]
 pub struct EdgeArgs {
     /// The node that has to finish first, 32 hex characters.

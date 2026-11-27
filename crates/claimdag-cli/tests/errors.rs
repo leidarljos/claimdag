@@ -334,7 +334,7 @@ fn help_documents_the_exit_statuses() {
         .join(" ");
     assert!(
         flat.contains(
-            "Exit status is 0 when the verb ran, 1 when it was refused, and 2 when the arguments could not be read."
+            "Exit status is 0 when the verb ran, 1 when it was refused, 2 when the arguments could not be read, and 3 when a link would close a cycle."
         ),
         "{flat}"
     );

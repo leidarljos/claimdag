@@ -3,7 +3,10 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use claimdag::{WorkFields, WorkGraph, WorkId, WorkKind, WorkNode, WorkRole, WorkStatus};
+use claimdag::{
+    EdgeKind, Fault, WorkFields, WorkGraph, WorkId, WorkKind, WorkNode, WorkRole, WorkStatus,
+    CYCLE_EXIT,
+};
 use clap::{CommandFactory, Parser, Subcommand};
 
 #[derive(Parser)]
@@ -12,7 +15,7 @@ use clap::{CommandFactory, Parser, Subcommand};
     version,
     about = "CAS claim and complete on a DAG",
     disable_help_subcommand = true,
-    after_help = "Exit status is 0 when the verb ran, 1 when it was refused, and 2 when the arguments could not be read. A refusal names the node, who holds it and the unix second that holder was last written when those apply, and the command that resolves it."
+    after_help = "Exit status is 0 when the verb ran, 1 when it was refused, 2 when the arguments could not be read, and 3 when a link would close a cycle. A refusal names the node, who holds it and the unix second that holder was last written when those apply, and the command that resolves it."
 )]
 struct Cli {
     /// Directory with work.bin (else CLAIMDAG_DIR, else
@@ -169,17 +172,20 @@ enum Cmd {
         #[arg(long, default_value_t = claimdag::DEFAULT_LEASE_SECS)]
         lease: u64,
     },
-    /// Add a boolean hard dependency (parent before child).
+    /// Record an edge (parent before child). hard, needs, pin and history block; advisory is recorded and does not.
     Link {
-        /// 32-hex id of the dependency that must finish first.
+        /// 32-hex id of the dependency. A blocking kind waits until it is done.
         parent: String,
         /// 32-hex id of the dependent node.
         child: String,
+        /// hard, needs, pin, history, or advisory.
+        #[arg(long, default_value = "hard")]
+        kind: String,
         /// Caller actor id (32 hex).
         #[arg(long, default_value = "00000000000000000000000000000000")]
         actor: String,
     },
-    /// Drop a boolean hard dependency. Missing edge is ok.
+    /// Drop an edge. Missing edge is ok.
     Unlink {
         /// 32-hex id of the dependency.
         parent: String,
@@ -224,6 +230,11 @@ enum Cmd {
 /// Characters in a work id. `WorkId` is two `u64`s, printed as 16 hex
 /// characters each, and `WorkId::from_hex` accepts that width only.
 const ID_HEX_CHARS: usize = 16 + 16;
+
+fn parse_edge_kind(raw: &str) -> Result<EdgeKind, String> {
+    EdgeKind::parse_str(raw)
+        .ok_or_else(|| format!("bad kind {raw}: expected hard, needs, pin, history, or advisory"))
+}
 
 fn parse_kind(raw: &str) -> Result<WorkKind, String> {
     WorkKind::parse_str(raw)
@@ -428,7 +439,8 @@ fn print_get(n: &WorkNode) {
     } else {
         n.deps
             .iter()
-            .map(|d| d.to_hex())
+            .enumerate()
+            .map(|(i, d)| format!("{} {}", d.to_hex(), n.kind_at(i).as_str()))
             .collect::<Vec<_>>()
             .join(" ")
     };
@@ -504,9 +516,10 @@ fn reads_only(cmd: &Cmd) -> bool {
 fn main() {
     if let Err(e) = run() {
         eprintln!("{e}");
-        // Refusals exit 1. Clap exits 2 itself when it cannot read the
+        // Refusals exit 1, except a link that would close a cycle, which
+        // exits CYCLE_EXIT. Clap exits 2 itself when it cannot read the
         // arguments, which is clap 4's default for a parse error. `--help`
-        // states both.
+        // states each of these.
         std::process::exit(1);
     }
 }
@@ -758,12 +771,21 @@ fn run() -> Result<(), String> {
         Cmd::Link {
             parent,
             child,
+            kind,
             actor,
         } => {
+            let kind = parse_edge_kind(&kind)?;
             let parent = parse_id(&parent, &g)?;
             let child = parse_id(&child, &g)?;
             let actor = parse_id(&actor, &g)?;
-            g.link_dep(parent, child, actor)?;
+            match g.link_edge(parent, child, kind, actor) {
+                Ok(()) => {}
+                Err(err @ Fault::Cycle { .. }) => {
+                    eprintln!("{err}");
+                    std::process::exit(CYCLE_EXIT);
+                }
+                Err(Fault::Msg(err)) => return Err(err),
+            }
             g.save_dir(&dir)?;
             println!("{}  {}", parent.to_hex(), child.to_hex());
         }

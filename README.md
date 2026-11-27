@@ -73,7 +73,7 @@ $ claimdag --dir /tmp/demo-seat archive $a
 - `claim` is CAS on `gen` (omit `--gen` to ignore). Terminal is sticky.
 - `archive` sets a flag on a terminal node. The status stays the terminal status it already had. The node stays in the snapshot.
 - Default `list` is live work only (`--terminal`, `--archived`, `--all`).
-- `link` is a boolean hard dependency.
+- `link` records an edge. Hard, needs, pin and history block; advisory does not. A blocking cycle exits 3.
 - `ready` is unblocked and unheld, deepest chain first. Take the first one.
 
 ## Which ready node

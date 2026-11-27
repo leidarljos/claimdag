@@ -55,6 +55,67 @@ Variants:
 - =NoSnapshot=: A directory with no snapshot in it.
 - =Unreadable=: A snapshot that could not be parsed, and the reason given.
 
+** EdgeKind
+
+#+begin_src rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EdgeKind
+#+end_src
+
+Why an edge orders two nodes.
+
+=Hard=, =Needs=, =Pin= and =History= block: the child waits, and adding one that would close a cycle is refused. =Advisory= is recorded and never orders the nodes, so it never closes a cycle and never keeps a node out of =WorkGraph::ready_view=.
+
+
+Variants:
+
+- =Hard=
+- =Needs=
+- =Pin=
+- =History=
+- =Advisory=
+
+*** EdgeKind::blocks
+
+#+begin_src rust
+#[must_use]
+pub fn blocks(self) -> bool
+#+end_src
+
+Whether this edge makes the child wait.
+
+
+*** EdgeKind::as_str
+
+#+begin_src rust
+#[must_use]
+pub fn as_str(self) -> &'static str
+#+end_src
+
+*** EdgeKind::parse_str
+
+#+begin_src rust
+#[must_use]
+pub fn parse_str(s: &str) -> Option<Self>
+#+end_src
+
+** Fault
+
+#+begin_src rust
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Fault
+#+end_src
+
+A call that could not be applied.
+
+=Fault::Cycle= is the refusal for a blocking edge that would close a cycle, and for a blocking cycle already stored. The command line exits =CYCLE_EXIT= for it. Every other refusal is =Fault::Msg= and exits 1.
+
+
+Variants:
+
+- =Cycle=: =node= is on the cycle. For a refused link, it is the child that would have gained the edge.
+- =Msg=: A refusal whose text is already the whole message.
+
 ** WorkFields
 
 #+begin_src rust
@@ -152,6 +213,28 @@ What an upsert is asserting about a node.
 pub fn link_dep(&mut self, parent: WorkId, child: WorkId, actor: WorkId) -> Result<(), String>
 #+end_src
 
+Record a hard edge: =parent= finishes before =child=.
+
+The call shape from before kinds. =WorkGraph::link_edge= takes the kind.
+
+
+*** WorkGraph::link_edge
+
+#+begin_src rust
+pub fn link_edge(
+        &mut self,
+        parent: WorkId,
+        child: WorkId,
+        kind: EdgeKind,
+        actor: WorkId,
+    ) -> Result<(), Fault>
+#+end_src
+
+Record an edge of =kind= from =parent= to =child=.
+
+A blocking kind that would close a cycle is =Fault::Cycle= and the graph is left as it was. An advisory edge is stored and does not order anything, so it is never a cycle.
+
+
 *** WorkGraph::unlink_dep
 
 #+begin_src rust
@@ -163,7 +246,7 @@ pub fn unlink_dep(
     ) -> Result<(), String>
 #+end_src
 
-Drop a boolean hard dep. Missing edge is Ok.
+Drop an edge. A missing edge is Ok.
 
 
 *** WorkGraph::critical_depth
@@ -349,7 +432,7 @@ pub fn unarchive(&mut self, id: WorkId, actor: WorkId) -> Result<(), String>
 *** WorkGraph::verify
 
 #+begin_src rust
-pub fn verify(&self) -> Result<(), String>
+pub fn verify(&self) -> Result<(), Fault>
 #+end_src
 
 *** WorkGraph::open_dir
@@ -457,12 +540,32 @@ Fields:
 - =pub assignee: WorkId=
 - =pub parent: WorkId=
 - =pub deps: Vec<WorkId>=
+- =pub dep_kinds: Vec<EdgeKind>=: Kind of each =deps= entry, in the same order. A missing slot is hard, which is what a snapshot written before kinds stores.
 - =pub cas_gen: u64=
 - =pub created_unix: u64=
 - =pub updated_unix: u64=
 - =pub finished_unix: u64=
 - =pub summary: String=: Sole open-content field (writer-owned length).
 - =pub archived: bool=: Soft hide. Only legal on a terminal node.
+
+*** WorkNode::kind_at
+
+#+begin_src rust
+#[must_use]
+pub fn kind_at(&self, index: usize) -> EdgeKind
+#+end_src
+
+The kind of =deps[index]=. A slot that was not stored is hard.
+
+
+*** WorkNode::blocking
+
+#+begin_src rust
+pub fn blocking(&self) -> impl Iterator<Item = WorkId> + '_
+#+end_src
+
+Dependencies that order this node. Advisory edges are not among them.
+
 
 ** WorkRole
 
@@ -531,6 +634,15 @@ pub fn parse_str(s: &str) -> Option<Self>
 #+begin_src rust
 pub fn is_terminal(self) -> bool
 #+end_src
+
+** CYCLE_EXIT
+
+#+begin_src rust
+pub const CYCLE_EXIT: i32 = 3
+#+end_src
+
+Process status for =Fault::Cycle=. 1 is every other refusal, 2 is arguments the command line could not read.
+
 
 ** SNAP_FILE
 

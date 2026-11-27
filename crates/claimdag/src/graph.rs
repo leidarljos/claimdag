@@ -369,6 +369,81 @@ impl WorkKind {
     }
 }
 
+/// Why an edge orders two nodes.
+///
+/// `Hard`, `Needs`, `Pin` and `History` block: the child waits, and adding
+/// one that would close a cycle is refused. `Advisory` is recorded and never
+/// orders the nodes, so it never closes a cycle and never keeps a node out
+/// of [`WorkGraph::ready_view`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EdgeKind {
+    Hard,
+    Needs,
+    Pin,
+    History,
+    Advisory,
+}
+
+impl EdgeKind {
+    /// Whether this edge makes the child wait.
+    #[must_use]
+    pub fn blocks(self) -> bool {
+        !matches!(self, Self::Advisory)
+    }
+
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Hard => "hard",
+            Self::Needs => "needs",
+            Self::Pin => "pin",
+            Self::History => "history",
+            Self::Advisory => "advisory",
+        }
+    }
+
+    #[must_use]
+    pub fn parse_str(s: &str) -> Option<Self> {
+        match s {
+            "hard" => Some(Self::Hard),
+            "needs" => Some(Self::Needs),
+            "pin" => Some(Self::Pin),
+            "history" => Some(Self::History),
+            "advisory" => Some(Self::Advisory),
+            _ => None,
+        }
+    }
+}
+
+/// A call that could not be applied.
+///
+/// [`Fault::Cycle`] is the refusal for a blocking edge that would close a
+/// cycle, and for a blocking cycle already stored. The command line exits
+/// [`CYCLE_EXIT`] for it. Every other refusal is [`Fault::Msg`] and exits 1.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Fault {
+    /// `node` is on the cycle. For a refused link, it is the child that
+    /// would have gained the edge.
+    Cycle { node: WorkId },
+    /// A refusal whose text is already the whole message.
+    Msg(String),
+}
+
+/// Process status for [`Fault::Cycle`]. 1 is every other refusal, 2 is
+/// arguments the command line could not read.
+pub const CYCLE_EXIT: i32 = 3;
+
+impl std::fmt::Display for Fault {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Cycle { node } => write!(f, "cycle involving {}", node.to_hex()),
+            Self::Msg(text) => f.write_str(text),
+        }
+    }
+}
+
+impl std::error::Error for Fault {}
+
 #[derive(Debug, Clone)]
 pub struct WorkNode {
     pub id: WorkId,
@@ -378,6 +453,9 @@ pub struct WorkNode {
     pub assignee: WorkId,
     pub parent: WorkId,
     pub deps: Vec<WorkId>,
+    /// Kind of each `deps` entry, in the same order. A missing slot is hard,
+    /// which is what a snapshot written before kinds stores.
+    pub dep_kinds: Vec<EdgeKind>,
     pub cas_gen: u64,
     pub created_unix: u64,
     pub updated_unix: u64,
@@ -386,6 +464,22 @@ pub struct WorkNode {
     pub summary: String,
     /// Soft hide. Only legal on a terminal node.
     pub archived: bool,
+}
+
+impl WorkNode {
+    /// The kind of `deps[index]`. A slot that was not stored is hard.
+    #[must_use]
+    pub fn kind_at(&self, index: usize) -> EdgeKind {
+        self.dep_kinds.get(index).copied().unwrap_or(EdgeKind::Hard)
+    }
+
+    /// Dependencies that order this node. Advisory edges are not among them.
+    pub fn blocking(&self) -> impl Iterator<Item = WorkId> + '_ {
+        self.deps
+            .iter()
+            .enumerate()
+            .filter_map(|(i, id)| self.kind_at(i).blocks().then_some(*id))
+    }
 }
 
 /// One operation, as the graph saw it in this process.
@@ -681,6 +775,7 @@ impl WorkGraph {
             assignee: WorkId::ZERO,
             parent,
             deps: Vec::new(),
+            dep_kinds: Vec::new(),
             // Start at 1 so wire expectedGen=0 means "ignore", not "assert gen 0".
             cas_gen: 1,
             created_unix: now,
@@ -741,25 +836,59 @@ impl WorkGraph {
         Ok(wid)
     }
 
+    /// Record a hard edge: `parent` finishes before `child`.
+    ///
+    /// The call shape from before kinds. [`WorkGraph::link_edge`] takes the kind.
     pub fn link_dep(&mut self, parent: WorkId, child: WorkId, actor: WorkId) -> Result<(), String> {
+        self.link_edge(parent, child, EdgeKind::Hard, actor)
+            .map_err(|err| err.to_string())
+    }
+
+    /// Record an edge of `kind` from `parent` to `child`.
+    ///
+    /// A blocking kind that would close a cycle is [`Fault::Cycle`] and the
+    /// graph is left as it was. An advisory edge is stored and does not
+    /// order anything, so it is never a cycle.
+    pub fn link_edge(
+        &mut self,
+        parent: WorkId,
+        child: WorkId,
+        kind: EdgeKind,
+        actor: WorkId,
+    ) -> Result<(), Fault> {
         if parent.is_zero() || child.is_zero() {
-            return Err("link: zero id".into());
+            return Err(Fault::Msg("link: zero id".into()));
         }
         if parent == child {
-            return Err("link: self-dep".into());
+            return Err(Fault::Msg("link: self-dep".into()));
         }
         if !self.nodes.contains_key(&parent) {
-            return Err(missing_endpoint("link", "parent", parent));
+            return Err(Fault::Msg(missing_endpoint("link", "parent", parent)));
         }
         if !self.nodes.contains_key(&child) {
-            return Err(missing_endpoint("link", "child", child));
+            return Err(Fault::Msg(missing_endpoint("link", "child", child)));
         }
-        if self.would_cycle(parent, child) {
-            return Err("link: would create cycle".into());
+        // Checked before the write, including a repeat of an edge that is
+        // already there: a blocking walk that already reaches the child is
+        // the same refusal as a new edge would be.
+        if kind.blocks() && self.would_cycle(parent, child) {
+            return Err(Fault::Cycle { node: child });
         }
         let node = self.nodes.get_mut(&child).expect("child present");
-        if !node.deps.contains(&parent) {
+        if let Some(at) = node.deps.iter().position(|dep| *dep == parent) {
+            if node.kind_at(at) != kind {
+                if at < node.dep_kinds.len() {
+                    node.dep_kinds[at] = kind;
+                } else {
+                    node.dep_kinds.resize(at, EdgeKind::Hard);
+                    node.dep_kinds.push(kind);
+                }
+                node.updated_unix = Self::now();
+            }
+        } else {
             node.deps.push(parent);
+            node.dep_kinds.resize(node.deps.len() - 1, EdgeKind::Hard);
+            node.dep_kinds.push(kind);
             node.updated_unix = Self::now();
         }
         self.recompute_ready(child);
@@ -767,7 +896,7 @@ impl WorkGraph {
         Ok(())
     }
 
-    /// Drop a boolean hard dep. Missing edge is Ok.
+    /// Drop an edge. A missing edge is Ok.
     pub fn unlink_dep(
         &mut self,
         parent: WorkId,
@@ -781,9 +910,11 @@ impl WorkGraph {
             .nodes
             .get_mut(&child)
             .ok_or_else(|| missing_endpoint("unlink", "child", child))?;
-        let before = node.deps.len();
-        node.deps.retain(|d| *d != parent);
-        if node.deps.len() != before {
+        if let Some(at) = node.deps.iter().position(|dep| *dep == parent) {
+            node.deps.remove(at);
+            if at < node.dep_kinds.len() {
+                node.dep_kinds.remove(at);
+            }
             node.updated_unix = Self::now();
         }
         self.recompute_ready(child);
@@ -802,7 +933,7 @@ impl WorkGraph {
                 continue;
             }
             if let Some(n) = self.nodes.get(&id) {
-                stack.extend(n.deps.iter().copied());
+                stack.extend(n.blocking());
             }
         }
         false
@@ -838,8 +969,8 @@ impl WorkGraph {
             if node.archived || node.status.is_terminal() {
                 continue;
             }
-            for dep in &node.deps {
-                below.entry(*dep).or_default().push(node.id);
+            for dep in node.blocking() {
+                below.entry(dep).or_default().push(node.id);
             }
         }
 
@@ -1076,9 +1207,10 @@ impl WorkGraph {
     }
 
     fn deps_satisfied(&self, node: &WorkNode) -> bool {
-        node.deps.iter().all(|d| {
+        // Advisory edges are recorded and do not keep the node out of ready.
+        node.blocking().all(|d| {
             self.nodes
-                .get(d)
+                .get(&d)
                 .map(|p| p.status == WorkStatus::Done)
                 .unwrap_or(false)
         })
@@ -1157,7 +1289,7 @@ impl WorkGraph {
             if !matches!(node.status, WorkStatus::Ready | WorkStatus::Todo) {
                 return Err(format!("claim: status {}", node.status.as_str()));
             }
-            node.deps.clone()
+            node.blocking().collect()
         };
         // The same predicate as `deps_satisfied`: done counts, anything else,
         // including a dependency no longer in the graph, does not.
@@ -1508,7 +1640,7 @@ impl WorkGraph {
             let deps = if terminal || status != WorkStatus::Done {
                 Vec::new()
             } else {
-                node.deps.clone()
+                node.blocking().collect()
             };
             (holder, terminal, deps)
         };
@@ -1590,35 +1722,43 @@ impl WorkGraph {
         Ok(())
     }
 
-    pub fn verify(&self) -> Result<(), String> {
-        for (id, n) in &self.nodes {
-            for d in &n.deps {
-                if !self.nodes.contains_key(d) {
-                    return Err(format!(
+    pub fn verify(&self) -> Result<(), Fault> {
+        // Sorted so the node named in a cycle does not depend on hash order.
+        let mut ids: Vec<WorkId> = self.nodes.keys().copied().collect();
+        ids.sort();
+        for id in ids {
+            let n = &self.nodes[&id];
+            for dep in &n.deps {
+                if !self.nodes.contains_key(dep) {
+                    return Err(Fault::Msg(format!(
                         "verify: {} deps missing {}",
                         id.to_hex(),
-                        d.to_hex()
-                    ));
+                        dep.to_hex()
+                    )));
                 }
             }
-            let mut stack = n.deps.clone();
+            // Advisory edges do not order, so a loop of them is not a cycle.
+            let mut stack: Vec<WorkId> = n.blocking().collect();
             let mut seen = HashSet::new();
             while let Some(cur) = stack.pop() {
-                if cur == *id {
-                    return Err(format!("verify: cycle involving {}", id.to_hex()));
+                if cur == id {
+                    return Err(Fault::Cycle { node: id });
                 }
                 if !seen.insert(cur) {
                     continue;
                 }
                 if let Some(nn) = self.nodes.get(&cur) {
-                    stack.extend(nn.deps.iter().copied());
+                    stack.extend(nn.blocking());
                 }
             }
             // A parent that is not in the graph is not an error: prune drops
             // finished work and leaves its children as roots. A parent chain
             // that comes back to where it started is.
-            if !n.parent.is_zero() && self.parent_reaches(n.parent, *id) {
-                return Err(format!("verify: parent cycle involving {}", id.to_hex()));
+            if !n.parent.is_zero() && self.parent_reaches(n.parent, id) {
+                return Err(Fault::Msg(format!(
+                    "verify: parent cycle involving {}",
+                    id.to_hex()
+                )));
             }
         }
         Ok(())
@@ -2653,5 +2793,23 @@ mod tests {
             .claim_next(worker3, WorkRole::Unset, 1)
             .expect_err("no ready work");
         assert_eq!(no_work_err, "claim-next: no ready work");
+    }
+
+    /// A blocking cycle already stored is the same error a refused link
+    /// returns. Advisory edges are not part of that walk.
+    #[test]
+    fn verify_reports_a_stored_blocking_cycle() {
+        let mut g = WorkGraph::default();
+        let a = id(1);
+        let b = id(2);
+        upsert_ready(&mut g, a, "a");
+        upsert_ready(&mut g, b, "b");
+        g.link_edge(a, b, EdgeKind::Hard, id(9)).unwrap();
+        g.link_edge(b, a, EdgeKind::Advisory, id(9)).unwrap();
+        g.verify().expect("an advisory return is not a cycle");
+        g.nodes.get_mut(&a).unwrap().dep_kinds[0] = EdgeKind::Hard;
+        let err = g.verify().unwrap_err();
+        assert_eq!(err, Fault::Cycle { node: a });
+        assert_eq!(err.to_string(), format!("cycle involving {}", a.to_hex()));
     }
 }

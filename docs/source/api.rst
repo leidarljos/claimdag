@@ -154,6 +154,27 @@ WorkGraph::link\ :sub:`dep`
 
    pub fn link_dep(&mut self, parent: WorkId, child: WorkId, actor: WorkId) -> Result<(), String>
 
+Record a hard edge: ``parent`` finishes before ``child``.
+
+The call shape from before kinds. ``WorkGraph::link_edge`` takes the kind.
+
+WorkGraph::link\ :sub:`edge`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code:: rust
+
+   pub fn link_edge(
+           &mut self,
+           parent: WorkId,
+           child: WorkId,
+           kind: EdgeKind,
+           actor: WorkId,
+       ) -> Result<(), Fault>
+
+Record an edge of ``kind`` from ``parent`` to ``child``.
+
+A blocking kind that would close a cycle is ``Fault::Cycle`` and the graph is left as it was. An advisory edge is stored and does not order anything, so it is never a cycle.
+
 WorkGraph::unlink\ :sub:`dep`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -166,7 +187,7 @@ WorkGraph::unlink\ :sub:`dep`
            actor: WorkId,
        ) -> Result<(), String>
 
-Drop a boolean hard dep. Missing edge is Ok.
+Drop an edge. A missing edge is Ok.
 
 WorkGraph::critical\ :sub:`depth`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -358,7 +379,7 @@ WorkGraph::verify
 
 .. code:: rust
 
-   pub fn verify(&self) -> Result<(), String>
+   pub fn verify(&self) -> Result<(), Fault>
 
 WorkGraph::open\ :sub:`dir`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -36,6 +36,16 @@ enum Kind {
   molecule @4;
 }
 
+# Why an edge orders two nodes. hard is ordinal 0, so a missing value is hard.
+# needs, pin and history block. advisory is recorded and orders nothing.
+enum EdgeKind {
+  hard @0;
+  needs @1;
+  pin @2;
+  history @3;
+  advisory @4;
+}
+
 struct Node {
   id @0 :WorkId;
   kind @1 :Kind;
@@ -50,6 +60,9 @@ struct Node {
   finishedUnix @10 :UInt64;
   summary @11 :Text;
   archived @12 :Bool;
+  # Parallel to deps. Absent, or shorter than deps, means hard for each
+  # missing slot. A new field: deps stays @6.
+  depKinds @13 :List(EdgeKind);
 }
 
 struct Snap {

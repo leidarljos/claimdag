@@ -3,7 +3,9 @@
 
 use std::path::PathBuf;
 
-use claimdag::{Absent, WorkFields, WorkGraph, WorkId, WorkKind, WorkNode, WorkRole, WorkStatus};
+use claimdag::{
+    Absent, EdgeKind, WorkFields, WorkGraph, WorkId, WorkKind, WorkNode, WorkRole, WorkStatus,
+};
 use rmcp::{
     handler::server::tool::IntoCallToolResult, handler::server::wrapper::Parameters,
     handler::server::ServerHandler, model::*, prompt_handler, tool, tool_handler, tool_router,
@@ -86,7 +88,7 @@ fn row(node: &WorkNode, now: u64, waiting_below: u32) -> NodeRow {
         summary: node.summary.clone(),
         assignee: (!node.assignee.is_zero()).then(|| node.assignee.to_hex()),
         generation: node.cas_gen,
-        blocked_by: node.deps.iter().map(|d| d.to_hex()).collect(),
+        blocked_by: node.blocking().map(|d| d.to_hex()).collect(),
         quiet_seconds: held.then(|| now.saturating_sub(node.updated_unix)),
         waiting_below,
     }
@@ -718,7 +720,7 @@ impl ClaimdagServer {
     }
 
     #[tool(
-        description = "Record that the parent finishes before the child. The child waits until the parent is done. Returns the child. Refused when either id is missing or the edge would make a cycle.",
+        description = "Record an edge from parent to child. kind is hard, needs, pin, history, or advisory; omitted means hard. hard, needs, pin and history block until the parent is done. advisory is recorded and does not block or close a cycle. Returns the child. Refused when either id is missing or a blocking edge would make a cycle.",
         annotations(
             title = "Depend on a node",
             read_only_hint = false,
@@ -729,13 +731,21 @@ impl ClaimdagServer {
     )]
     async fn claimdag_link(
         &self,
-        Parameters(args): Parameters<EdgeArgs>,
+        Parameters(args): Parameters<LinkArgs>,
     ) -> Result<Json<NodeRow>, Fail> {
         let parent = parse(&args.parent)?;
         let child = parse(&args.child)?;
         let actor = parse(&args.actor)?;
+        let kind = match args.kind.as_deref() {
+            None => EdgeKind::Hard,
+            Some(raw) => {
+                EdgeKind::parse_str(raw).ok_or_else(|| invalid(format!("bad kind {raw}")))?
+            }
+        };
         let (dir, _lock, mut graph) = self.writing()?;
-        graph.link_dep(parent, child, actor).map_err(bad)?;
+        graph
+            .link_edge(parent, child, kind, actor)
+            .map_err(|err| bad(err.to_string()))?;
         let warnings = self.stored(&dir, &graph)?;
         Ok(Json::noted(shown(&graph, child)?, warnings))
     }
@@ -1268,6 +1278,62 @@ mod tests {
         let q1 = hinge(&samples[..mid]);
         let q3 = hinge(&samples[mid..]);
         (med, q3 - q1)
+    }
+
+    /// An advisory edge is stored and is not a blocker. A blocking return
+    /// is the same cycle text the command line exits 3 for.
+    #[tokio::test]
+    async fn an_advisory_link_is_stored_and_a_cycle_uses_the_same_text() {
+        let (dir, server) = seat();
+        let left = work(dir.path(), "left");
+        let right = work(dir.path(), "right");
+        let actor = WorkId { hi: 1, lo: 1 }.to_hex();
+        let linked = server
+            .claimdag_link(Parameters(LinkArgs {
+                parent: left.to_hex(),
+                child: right.to_hex(),
+                actor: actor.clone(),
+                kind: Some("advisory".into()),
+            }))
+            .await
+            .expect("advisory link");
+        assert!(
+            linked.0.blocked_by.is_empty(),
+            "advisory listed as a blocker: {:?}",
+            linked.0.blocked_by
+        );
+        let graph = WorkGraph::load_dir(dir.path());
+        let node = graph.get(right).expect("child");
+        assert_eq!(node.deps, vec![left]);
+        assert_eq!(node.dep_kinds, vec![EdgeKind::Advisory]);
+        let ready: Vec<WorkId> = graph.ready_view().iter().map(|n| n.id).collect();
+        assert!(ready.contains(&left) && ready.contains(&right), "{ready:?}");
+
+        server
+            .claimdag_link(Parameters(LinkArgs {
+                parent: left.to_hex(),
+                child: right.to_hex(),
+                actor: actor.clone(),
+                kind: Some("hard".into()),
+            }))
+            .await
+            .expect("the same edge can become hard");
+        let linked = server
+            .claimdag_link(Parameters(LinkArgs {
+                parent: right.to_hex(),
+                child: left.to_hex(),
+                actor,
+                kind: Some("needs".into()),
+            }))
+            .await;
+        let Err(err) = linked else {
+            panic!("needs closed a cycle");
+        };
+        let text = format!("{err:?}");
+        assert!(
+            text.contains(&format!("cycle involving {}", left.to_hex())),
+            "{text}"
+        );
     }
 
     fn hinge(sorted: &[u128]) -> f64 {
